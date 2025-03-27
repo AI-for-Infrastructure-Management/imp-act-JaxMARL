@@ -15,6 +15,7 @@ from jaxmarl.environments.spaces import Box, Discrete
 
 # imp-act imports
 from imp_act import make
+from imp_act.environments.jax_environment import EnvState
 
 
 @struct.dataclass
@@ -36,20 +37,20 @@ class RoadEnvironment_Wrapper(object):
         num_damage_states = self.env.num_damage_states
         num_component_actions = len(self.env.action_map)
         self.observation_spaces = {
-            f"agent_{i}": Box(low=0, high=1, shape=(num_damage_states,))
-            for i in range(self.num_agents)
+            i: Box(low=0, high=1, shape=(num_damage_states,)) for i in self.agents
         }
-        self.action_spaces = {
-            f"agent_{i}": Discrete(num_component_actions)
-            for i in range(self.num_agents)
-        }
+        self.action_spaces = {i: Discrete(num_component_actions) for i in self.agents}
 
     @partial(jax.jit, static_argnums=(0,))
     def reset(self, key: chex.PRNGKey) -> Tuple[Dict[str, chex.Array], State]:
         """Performs resetting of the environment."""
 
         obs, state = self.env.reset(key)
-        obs = {f"agent_{i}": obs[i] for i in range(self.num_agents)}
+        obs = obs.astype(jnp.float32)
+        obs = {agent: obs[i] for i, agent in enumerate(self.agents)}
+
+        state = self.convert_state_to_float32(state)
+
         return obs, state
 
     @partial(jax.jit, static_argnums=(0,))
@@ -80,7 +81,8 @@ class RoadEnvironment_Wrapper(object):
         obs = jax.tree.map(
             lambda x, y: jax.lax.select(dones["__all__"], x, y), obs_re, obs_st
         )
-        return obs, states, rewards, dones, infos
+        #! TODO: add infos
+        return obs, states, rewards, dones, {}
 
     def step_env(
         self, key: chex.PRNGKey, state: State, actions: Dict[str, chex.Array]
@@ -88,32 +90,85 @@ class RoadEnvironment_Wrapper(object):
         """Environment-specific step transition."""
 
         # convert actions dict to array
-        array_actions = jnp.array(jax.tree_util.tree_leaves(actions))
+        array_actions = jnp.array(
+            jax.tree_util.tree_leaves(actions), dtype=jnp.int32
+        ).squeeze()
+
+        state = self.convert_state_to_float64(state)
 
         obs, next_state, reward, done, info = self.env.step_env(
             key, state, array_actions
         )
+        obs = obs.astype(jnp.float32)
+        reward = reward.astype(jnp.float32)
 
         # make obs a dict again
-        obs = {f"agent_{i}": obs[i] for i in range(self.num_agents)}
+        obs = {agent: obs[i] for i, agent in enumerate(self.agents)}
+        reward = {agent: reward for i, agent in enumerate(self.agents)}
 
         # modify the done signal to include the "__all__" key
         dones = {a: done for i, a in enumerate(self.agents)}
         dones.update({"__all__": done})
 
+        next_state = self.convert_state_to_float32(next_state)
+
         return obs, next_state, reward, dones, info
+
+    @staticmethod
+    def convert_state_to_float32(state):
+        """
+        Converts all attributes of state object to float32 by creating
+        a new object.
+        """
+
+        env_state = EnvState(
+            damage_state=state.damage_state.astype(jnp.int32),
+            observation=state.observation.astype(jnp.int32),
+            belief=state.belief.astype(jnp.float32),
+            base_travel_time=state.base_travel_time.astype(jnp.float32),
+            capacity=state.capacity.astype(jnp.float32),
+            worst_obs_counter=state.worst_obs_counter.astype(jnp.int32),
+            deterioration_rate=state.deterioration_rate.astype(jnp.int32),
+            timestep=state.timestep,
+            budget_remaining=state.budget_remaining,
+            episode_return=state.episode_return,
+        )
+
+        return env_state
+
+    @staticmethod
+    def convert_state_to_float64(state):
+        """
+        Converts all attributes of state object to float64 by creating
+        a new object.
+        """
+
+        env_state = EnvState(
+            damage_state=state.damage_state.astype(jnp.int64),
+            observation=state.observation.astype(jnp.int64),
+            belief=state.belief.astype(jnp.float64),
+            base_travel_time=state.base_travel_time.astype(jnp.float64),
+            capacity=state.capacity.astype(jnp.float64),
+            worst_obs_counter=state.worst_obs_counter.astype(jnp.int64),
+            deterioration_rate=state.deterioration_rate.astype(jnp.int64),
+            timestep=state.timestep,
+            budget_remaining=state.budget_remaining,
+            episode_return=state.episode_return,
+        )
+
+        return env_state
 
     def get_obs(self, state: State) -> Dict[str, chex.Array]:
         """Applies observation function to state."""
-        return self.env.get_obs(state)
+        raise NotImplementedError
 
-    def observation_space(self, agent: str = "agent_0"):
+    def observation_space(self, agent=None):
         """Observation space for a given agent."""
-        return self.observation_spaces[agent]
+        return self.observation_spaces[self.agents[0]]
 
-    def action_space(self, agent: str = "agent_0"):
+    def action_space(self, agent=None):
         """Action space for a given agent."""
-        return self.action_spaces[agent]
+        return self.action_spaces[self.agents[0]]
 
     @partial(jax.jit, static_argnums=(0,))
     def get_avail_actions(self, state: State = None) -> Dict[str, chex.Array]:
