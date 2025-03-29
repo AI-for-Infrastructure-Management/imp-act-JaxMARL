@@ -12,7 +12,7 @@ from typing import Sequence, NamedTuple, Any
 from flax.training.train_state import TrainState
 import distrax
 import jaxmarl
-from jaxmarl.wrappers.baselines import MPELogWrapper as LogWrapper 
+from jaxmarl.wrappers.baselines import LogWrapper
 import matplotlib.pyplot as plt
 import hydra
 from omegaconf import OmegaConf
@@ -327,6 +327,7 @@ def main(config):
     plt.xlabel("Updates")
     plt.ylabel("Returns")
     plt.title(f"IPPO-FF={config['ENV_NAME']}")
+    plt.savefig(f"ippo_ff_{config['ENV_NAME']}.png")
     
     '''updates_x = jnp.arange(out["metrics"]["total_loss"][0].shape[0])
     loss_table = jnp.stack([updates_x, out["metrics"]["total_loss"].mean(axis=0), out["metrics"]["actor_loss"].mean(axis=0), out["metrics"]["critic_loss"].mean(axis=0), out["metrics"]["entropy"].mean(axis=0), out["metrics"]["ratio"].mean(axis=0)], axis=1)    
