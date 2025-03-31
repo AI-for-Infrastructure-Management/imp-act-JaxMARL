@@ -19,5 +19,5 @@
 
 # WandB Params
 "ENTITY": ""
-"PROJECT": "jaxmarl-mpe"
+"PROJECT": "jaxmarl-road-env"
 "WANDB_MODE" : "disabled"
