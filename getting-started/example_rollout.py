@@ -46,19 +46,35 @@ obs, env_state = ctrm_env.batch_reset(key_reset)
 runner = Runner(key=key, env_state=env_state, obs=obs)
 
 
+def policy(obs, key):
+    # do-nothing
+    actions = {
+        agent: jnp.zeros(NUM_ENVS, dtype=jnp.int32)
+        for a, agent in enumerate(env.agents)
+    }
+
+    # random actions
+    # actions = {}
+    # for a, agent in enumerate(env.agents):
+    #     key, subkey = jax.random.split(key)
+    #     # sample action from action space
+    #     actions[agent] = jax.random.randint(
+    #         subkey, (NUM_ENVS,), 0, env.action_spaces[agent].n
+    #     )
+    return actions
+
+
 def env_step(runner, unused):
     key, env_state, obs = runner.key, runner.env_state, runner.obs
     key, key_step, key_action = jax.random.split(key, 3)
 
     # choose actions
     # actions (dict): For each agent, an array of size NUM_ENVS
-    # (for now, do-nothing)
-    actions = {
-        agent: jnp.zeros(NUM_ENVS, dtype=jnp.int32)
-        for a, agent in enumerate(env.agents)
-    }
+    actions = policy(obs, key_action)
 
-    next_obs, env_state, _, _, infos = ctrm_env.batch_step(key_step, env_state, actions)
+    next_obs, env_state, reward, done, infos = ctrm_env.batch_step(
+        key_step, env_state, actions
+    )
 
     runner = Runner(key=key, env_state=env_state, obs=next_obs)
 
