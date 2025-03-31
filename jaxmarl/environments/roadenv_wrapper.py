@@ -37,7 +37,7 @@ class RoadEnvironment_Wrapper(object):
         num_damage_states = self.env.num_damage_states
         num_component_actions = len(self.env.action_map)
         self.observation_spaces = {
-            i: Box(low=0, high=1, shape=(num_damage_states,)) for i in self.agents
+            i: Box(low=0, high=1, shape=(num_damage_states + 2,)) for i in self.agents
         }
         self.action_spaces = {i: Discrete(num_component_actions) for i in self.agents}
 
@@ -45,8 +45,8 @@ class RoadEnvironment_Wrapper(object):
     def reset(self, key: chex.PRNGKey) -> Tuple[Dict[str, chex.Array], State]:
         """Performs resetting of the environment."""
 
-        obs, state = self.env.reset(key)
-        obs = obs.astype(jnp.float32)
+        _, state = self.env.reset(key)
+        obs = self.get_obs(state).astype(jnp.float32)
         obs = {agent: obs[i] for i, agent in enumerate(self.agents)}
 
         state = self.convert_state_to_float32(state)
@@ -96,10 +96,8 @@ class RoadEnvironment_Wrapper(object):
 
         state = self.convert_state_to_float64(state)
 
-        obs, next_state, reward, done, info = self.env.step_env(
-            key, state, array_actions
-        )
-        obs = obs.astype(jnp.float32)
+        _, next_state, reward, done, info = self.env.step_env(key, state, array_actions)
+        obs = self.get_obs(state).astype(jnp.float32)
         reward = reward.astype(jnp.float32)
 
         # make obs a dict again
@@ -113,6 +111,18 @@ class RoadEnvironment_Wrapper(object):
         next_state = self.convert_state_to_float32(next_state)
 
         return obs, next_state, reward, dones, info
+
+    def get_obs(self, state: State) -> Dict[str, chex.Array]:
+        """
+        Applies observation function to state.
+        Returns the observation for each agent as an array.
+        Shape: (num_agents, num_damage_states + 2)
+        The last two dimensions are the normalized timestep and budget.
+        """
+        N = self.env.total_num_segments
+        _timestep = jnp.full((N, 1), state.timestep / self.env.max_timesteps)
+        _budget = jnp.full((N, 1), state.budget_remaining / self.env.budget_amount)
+        return jnp.concatenate([state.belief, _timestep, _budget], axis=1)
 
     @staticmethod
     def convert_state_to_float32(state):
