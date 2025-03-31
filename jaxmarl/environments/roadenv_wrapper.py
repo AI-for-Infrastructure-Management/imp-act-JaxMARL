@@ -32,6 +32,7 @@ class RoadEnvironment_Wrapper(object):
         num_agents (int): maximum number of agents within the environment, used to set array dimensions
         """
         self.env = make(f"{map_name}-jax")
+        self.map_name = map_name
         self.num_agents = self.env.total_num_segments
         self.agents = [f"agent_{i}" for i in range(self.num_agents)]
         num_damage_states = self.env.num_damage_states
@@ -100,12 +101,11 @@ class RoadEnvironment_Wrapper(object):
         obs = self.get_obs(state).astype(jnp.float32)
         reward = reward.astype(jnp.float32)
 
-        # make obs a dict again
-        obs = {agent: obs[i] for i, agent in enumerate(self.agents)}
-        reward = {agent: reward for i, agent in enumerate(self.agents)}
-
+        # make obs, reward, done dicts
         # modify the done signal to include the "__all__" key
-        dones = {a: done for i, a in enumerate(self.agents)}
+        obs = {agent: obs[a] for a, agent in enumerate(self.agents)}
+        reward = {agent: reward for a, agent in enumerate(self.agents)}
+        dones = {agent: done for a, agent in enumerate(self.agents)}
         dones.update({"__all__": done})
 
         next_state = self.convert_state_to_float32(next_state)
@@ -123,6 +123,26 @@ class RoadEnvironment_Wrapper(object):
         _timestep = jnp.full((N, 1), state.timestep / self.env.max_timesteps)
         _budget = jnp.full((N, 1), state.budget_remaining / self.env.budget_amount)
         return jnp.concatenate([state.belief, _timestep, _budget], axis=1)
+
+    def observation_space(self, agent=None):
+        """
+        Observation space for a given agent.
+        All agents have the same observation space.
+        """
+        return self.observation_spaces[self.agents[0]]
+
+    def action_space(self, agent=None):
+        """
+        Action space for a given agent.
+        All agents have the same action space.
+        """
+        return self.action_spaces[self.agents[0]]
+
+    @partial(jax.jit, static_argnums=(0,))
+    def get_avail_actions(self, state: State = None) -> Dict[str, chex.Array]:
+        """Returns the available actions for each agent."""
+        num_component_actions = len(self.env.action_map)
+        return {i: list(range(num_component_actions)) for i in range(self.num_agents)}
 
     @staticmethod
     def convert_state_to_float32(state):
@@ -168,25 +188,7 @@ class RoadEnvironment_Wrapper(object):
 
         return env_state
 
-    def get_obs(self, state: State) -> Dict[str, chex.Array]:
-        """Applies observation function to state."""
-        raise NotImplementedError
-
-    def observation_space(self, agent=None):
-        """Observation space for a given agent."""
-        return self.observation_spaces[self.agents[0]]
-
-    def action_space(self, agent=None):
-        """Action space for a given agent."""
-        return self.action_spaces[self.agents[0]]
-
-    @partial(jax.jit, static_argnums=(0,))
-    def get_avail_actions(self, state: State = None) -> Dict[str, chex.Array]:
-        """Returns the available actions for each agent."""
-        num_component_actions = len(self.env.action_map)
-        return {i: list(range(num_component_actions)) for i in range(self.num_agents)}
-
     @property
     def name(self) -> str:
         """Environment name."""
-        return type(self).__name__
+        return self.map_name
