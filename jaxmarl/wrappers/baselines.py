@@ -389,6 +389,10 @@ class CTRolloutManager(JaxMARLWrapper):
         elif "hanabi" in env.name.lower():
             self.global_reward = lambda rewards: rewards[self.training_agents[0]]
             self.get_valid_actions = lambda state: jax.vmap(env.get_legal_moves)(state)
+        elif "road_env" in env.name.lower():
+            self.global_reward = lambda rewards: rewards[self.training_agents[0]]
+            # TODO: implement this function
+            # self.global_state =
 
     @partial(jax.jit, static_argnums=0)
     def batch_reset(self, key):

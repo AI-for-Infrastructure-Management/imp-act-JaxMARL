@@ -124,6 +124,10 @@ class RoadEnvironment_Wrapper(object):
         _budget = jnp.full((N, 1), state.budget_remaining / self.env.budget_amount)
         return jnp.concatenate([state.belief, _timestep, _budget], axis=1)
 
+    def get_global_state(self, obs, state: State) -> Dict[str, chex.Array]:
+        # TODO: implement this function
+        raise NotImplementedError
+
     def observation_space(self, agent=None):
         """
         Observation space for a given agent.
@@ -191,4 +195,4 @@ class RoadEnvironment_Wrapper(object):
     @property
     def name(self) -> str:
         """Environment name."""
-        return self.map_name
+        return "road_env"
