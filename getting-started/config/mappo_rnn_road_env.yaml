@@ -1,7 +1,7 @@
 "LR": 0.002
 "NUM_ENVS": 128
-"NUM_STEPS": 128 
-"TOTAL_TIMESTEPS": 1e7
+"NUM_STEPS": 128
+"TOTAL_TIMESTEPS": 1e6
 "FC_DIM_SIZE": 128
 "GRU_HIDDEN_DIM": 128
 "UPDATE_EPOCHS": 4
@@ -15,14 +15,10 @@
 "MAX_GRAD_NORM": 0.25
 "ACTIVATION": "relu"
 "OBS_WITH_AGENT_ID": True
-"ENV_NAME": "HeuristicEnemySMAX"
-"MAP_NAME": "2s3z"
-"SEED": 0
-"ENV_KWARGS": 
-  "see_enemy_actions": True
-  "walls_cause_death": True
-  "attack_mode": "closest"
+"ENV_NAME": "road_env"
+"ENV_KWARGS": {"map_name": "ToyExample-v2"}
 "ANNEAL_LR": True
+"SEED": 0
 
 # WandB Params
 "WANDB_MODE": "disabled"

@@ -38,7 +38,8 @@ class RoadEnvironment_Wrapper(object):
         num_damage_states = self.env.num_damage_states
         num_component_actions = len(self.env.action_map)
         self.observation_spaces = {
-            i: Box(low=0, high=1, shape=(num_damage_states + 2,)) for i in self.agents
+            agent: Box(low=0, high=1, shape=(num_damage_states + 2 + self.num_agents,))
+            for agent in self.agents
         }
         self.action_spaces = {i: Discrete(num_component_actions) for i in self.agents}
 
@@ -122,7 +123,8 @@ class RoadEnvironment_Wrapper(object):
         N = self.env.total_num_segments
         _timestep = jnp.full((N, 1), state.timestep / self.env.max_timesteps)
         _budget = jnp.full((N, 1), state.budget_remaining / self.env.budget_amount)
-        return jnp.concatenate([state.belief, _timestep, _budget], axis=1)
+        _id = jnp.eye(N, dtype=jnp.float32)
+        return jnp.concatenate([state.belief, _timestep, _budget, _id], axis=1)
 
     def get_global_state(self, obs, state: State) -> Dict[str, chex.Array]:
         # TODO: implement this function
