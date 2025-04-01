@@ -181,6 +181,41 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     return {a: x[i] for i, a in enumerate(agent_list)}
 
 
+def running_mean_std(mean, var, count, new_data):
+    """
+    Update running mean and variance with new data.
+
+    TODO: For now 1D array, Generalize to N-D array
+
+    Args:
+    - mean (jnp.array): Current running mean.
+    - var (jnp.array): Current running variance.
+    - count (float): Current sample count.
+    - new_data (jnp.array): Incoming batch of data.
+
+    Returns:
+    - new_mean (jnp.array): Updated mean.
+    - new_var (jnp.array): Updated variance.
+    - new_count (float): Updated sample count.
+
+    Adapted from: https://github.com/uoe-agents/epymarl/blob/main/src/components/standarize_stream.py
+    """
+    batch_mean = jnp.mean(new_data, axis=0)
+    batch_var = jnp.var(new_data, axis=0)
+    batch_count = new_data.shape[0]
+
+    delta = batch_mean - mean
+    tot_count = count + batch_count
+
+    new_mean = mean + (delta * batch_count) / tot_count
+    m_a = var * count
+    m_b = batch_var * batch_count
+    m_2 = m_a + m_b + (delta**2) * (count * batch_count) / tot_count
+    new_var = m_2 / tot_count
+
+    return new_mean, new_var, tot_count
+
+
 def make_train(config):
     env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
     env = RoadEnvWorldStateWrapper(env)
@@ -275,15 +310,30 @@ def make_train(config):
         ac_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"], 128)
         cr_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"], 128)
 
+        # INIT REWARD STANDARDIZATION
+        reward_mean, reward_var, reward_count = (
+            jnp.zeros((1,), dtype=jnp.float32),
+            jnp.zeros((1,), dtype=jnp.float32),
+            0,
+        )
+
         # TRAIN LOOP
         def _update_step(update_runner_state, unused):
             # COLLECT TRAJECTORIES
             runner_state, update_steps = update_runner_state
 
             def _env_step(runner_state, unused):
-                train_states, env_state, last_obs, last_done, hstates, rng = (
-                    runner_state
-                )
+                (
+                    train_states,
+                    env_state,
+                    last_obs,
+                    last_done,
+                    hstates,
+                    reward_standardization,
+                    rng,
+                ) = runner_state
+
+                reward_mean, reward_var, reward_count = reward_standardization
 
                 # SELECT ACTION
                 rng, _rng = jax.random.split(rng)
@@ -323,6 +373,12 @@ def make_train(config):
                 obsv, env_state, reward, done, info = jax.vmap(
                     env.step, in_axes=(0, 0, 0)
                 )(rng_step, env_state, env_act)
+                rewards_ = batchify(reward, env.agents, config["NUM_ACTORS"]).squeeze()
+                # standardize reward
+                reward_mean, reward_var, reward_count = running_mean_std(
+                    reward_mean, reward_var, reward_count, rewards_
+                )
+                rewards_ = (rewards_ - reward_mean) / jnp.sqrt(reward_var + 1e-8)
                 info = jax.tree.map(lambda x: x.reshape((config["NUM_ACTORS"])), info)
                 done_batch = batchify(done, env.agents, config["NUM_ACTORS"]).squeeze()
                 transition = Transition(
@@ -330,7 +386,7 @@ def make_train(config):
                     last_done,
                     action.squeeze(),
                     value.squeeze(),
-                    batchify(reward, env.agents, config["NUM_ACTORS"]).squeeze(),
+                    rewards_,
                     log_prob.squeeze(),
                     obs_batch,
                     world_state,
@@ -342,17 +398,27 @@ def make_train(config):
                     obsv,
                     done_batch,
                     (ac_hstate, cr_hstate),
+                    (reward_mean, reward_var, reward_count),
                     rng,
                 )
                 return runner_state, transition
 
-            initial_hstates = runner_state[-2]
+            reward_standardization = runner_state[-2]
+            initial_hstates = runner_state[-3]
             runner_state, traj_batch = jax.lax.scan(
                 _env_step, runner_state, None, config["NUM_STEPS"]
             )
 
             # CALCULATE ADVANTAGE
-            train_states, env_state, last_obs, last_done, hstates, rng = runner_state
+            (
+                train_states,
+                env_state,
+                last_obs,
+                last_done,
+                hstates,
+                reward_standardization,
+                rng,
+            ) = runner_state
 
             last_world_state = last_obs["world_state"].swapaxes(0, 1)
             last_world_state = last_world_state.reshape((config["NUM_ACTORS"], -1))
@@ -589,7 +655,15 @@ def make_train(config):
             metric["update_steps"] = update_steps
             jax.experimental.io_callback(callback, None, metric)
             update_steps = update_steps + 1
-            runner_state = (train_states, env_state, last_obs, last_done, hstates, rng)
+            runner_state = (
+                train_states,
+                env_state,
+                last_obs,
+                last_done,
+                hstates,
+                reward_standardization,
+                rng,
+            )
             return (runner_state, update_steps), metric
 
         rng, _rng = jax.random.split(rng)
@@ -599,6 +673,7 @@ def make_train(config):
             obsv,
             jnp.zeros((config["NUM_ACTORS"]), dtype=bool),
             (ac_init_hstate, cr_init_hstate),
+            (reward_mean, reward_var, reward_count),
             _rng,
         )
         runner_state, metric = jax.lax.scan(
