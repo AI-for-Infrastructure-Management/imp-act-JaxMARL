@@ -374,11 +374,11 @@ def make_train(config):
                     env.step, in_axes=(0, 0, 0)
                 )(rng_step, env_state, env_act)
                 rewards_ = batchify(reward, env.agents, config["NUM_ACTORS"]).squeeze()
-                # standardize reward
-                reward_mean, reward_var, reward_count = running_mean_std(
-                    reward_mean, reward_var, reward_count, rewards_
-                )
-                rewards_ = (rewards_ - reward_mean) / jnp.sqrt(reward_var + 1e-8)
+                if config["REWARD_STANDARDIZATION"]:
+                    reward_mean, reward_var, reward_count = running_mean_std(
+                        reward_mean, reward_var, reward_count, rewards_
+                    )
+                    rewards_ = (rewards_ - reward_mean) / jnp.sqrt(reward_var + 1e-8)
                 info = jax.tree.map(lambda x: x.reshape((config["NUM_ACTORS"])), info)
                 done_batch = batchify(done, env.agents, config["NUM_ACTORS"]).squeeze()
                 transition = Transition(
