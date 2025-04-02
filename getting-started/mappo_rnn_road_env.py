@@ -253,10 +253,10 @@ def make_train(config):
             ),
             jnp.zeros((1, config["NUM_ENVS"])),
         )
-        ac_init_hstate = ScannedRNN.initialize_carry(
+        _ac_init_hstate = ScannedRNN.initialize_carry(
             config["NUM_ENVS"], config["GRU_HIDDEN_DIM"]
         )
-        actor_network_params = actor_network.init(_rng_actor, ac_init_hstate, ac_init_x)
+        actor_network_params = actor_network.init(_rng_actor, _ac_init_hstate, ac_init_x)
         cr_init_x = (
             jnp.zeros(
                 (
@@ -267,11 +267,11 @@ def make_train(config):
             ),
             jnp.zeros((1, config["NUM_ENVS"])),
         )
-        cr_init_hstate = ScannedRNN.initialize_carry(
+        _cr_init_hstate = ScannedRNN.initialize_carry(
             config["NUM_ENVS"], config["GRU_HIDDEN_DIM"]
         )
         critic_network_params = critic_network.init(
-            _rng_critic, cr_init_hstate, cr_init_x
+            _rng_critic, _cr_init_hstate, cr_init_x
         )
 
         if config["ANNEAL_LR"]:
@@ -307,8 +307,8 @@ def make_train(config):
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
         obsv, env_state = jax.vmap(env.reset, in_axes=(0,))(reset_rng)
-        ac_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"], 128)
-        cr_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"], 128)
+        ac_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"], config["GRU_HIDDEN_DIM"])
+        cr_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"], config["GRU_HIDDEN_DIM"])
 
         # INIT REWARD STANDARDIZATION
         reward_mean, reward_var, reward_count = (
