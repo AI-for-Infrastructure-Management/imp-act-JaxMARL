@@ -1,26 +1,50 @@
-"LR": 0.002
-"NUM_ENVS": 128
-"NUM_STEPS": 128
 "TOTAL_TIMESTEPS": 1e6
-"FC_DIM_SIZE": 128
-"GRU_HIDDEN_DIM": 128
+"NUM_ENVS": 128
+"LR": 0.002
 "UPDATE_EPOCHS": 4
 "NUM_MINIBATCHES": 4
+
 REWARD_STANDARDIZATION: True
+"MAX_GRAD_NORM": 0.5
+"ENT_COEF": 0.01
+"NUM_STEPS": 128
 "GAE_LAMBDA": 0.95
 "CLIP_EPS": 0.2
-"SCALE_CLIP_EPS": False
-"ENT_COEF": 0.0
-"VF_COEF": 0.5
-"MAX_GRAD_NORM": 0.25
 "ACTIVATION": "relu"
-"OBS_WITH_AGENT_ID": True
+"VF_COEF": 0.5
+
+"GRU_HIDDEN_DIM": 128
+"FC_DIM_SIZE": 128
+"GAMMA": 0.99
+"ANNEAL_LR": True
+"SCALE_CLIP_EPS": False
+
+# ENV
 "ENV_NAME": "road_env"
 "ENV_KWARGS": {"map_name": "ToyExample-v2"}
-"ANNEAL_LR": True
+
+# EVALUATION
+"TEST_DURING_TRAINING": True
+"TEST_INTERVAL": 0.1 # as a fraction of updates
+"TEST_NUM_STEPS": 50
+"TEST_NUM_ENVS": 1_000
+
+"ALG_NAME": "mappo_rnn"
+
+############ global params ############
+
+# experiment params
+"NUM_SEEDS": 2 # number of vmapped seeds
 "SEED": 0
+
+"HYP_TUNE": True # perform hyp tune
 
 # WandB Params
 "WANDB_MODE": "disabled"
-"ENTITY": ""
-"PROJECT": ""
+"ENTITY": "shaktimaan"
+"PROJECT": "impact-JaxMARL"
+"WANDB_LOG_ALL_SEEDS": False # will log vmapped seeds separately
+"METRICS_TO_LOG": ["test_returned_episode_returns"]
+
+# where to save the params (if None, will not save)
+"SAVE_PATH": null

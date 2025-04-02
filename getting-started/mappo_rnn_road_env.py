@@ -4,6 +4,8 @@ Based on PureJaxRL Implementation of IPPO, with changes to give a centralised cr
 Adapted from: baselines/MAPPO/mappo_rnn_smax.py
 """
 
+import os
+import copy
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
@@ -216,10 +218,7 @@ def running_mean_std(mean, var, count, new_data):
     return new_mean, new_var, tot_count
 
 
-def make_train(config):
-    env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
-    env = RoadEnvWorldStateWrapper(env)
-    env = LogWrapper(env)
+def make_train(config, env):
 
     config["NUM_ACTORS"] = env.num_agents * config["NUM_ENVS"]
     config["NUM_UPDATES"] = (
@@ -256,7 +255,9 @@ def make_train(config):
         _ac_init_hstate = ScannedRNN.initialize_carry(
             config["NUM_ENVS"], config["GRU_HIDDEN_DIM"]
         )
-        actor_network_params = actor_network.init(_rng_actor, _ac_init_hstate, ac_init_x)
+        actor_network_params = actor_network.init(
+            _rng_actor, _ac_init_hstate, ac_init_x
+        )
         cr_init_x = (
             jnp.zeros(
                 (
@@ -304,11 +305,16 @@ def make_train(config):
         )
 
         # INIT ENV
+        original_seed = rng[0]
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
         obsv, env_state = jax.vmap(env.reset, in_axes=(0,))(reset_rng)
-        ac_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"], config["GRU_HIDDEN_DIM"])
-        cr_init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"], config["GRU_HIDDEN_DIM"])
+        ac_init_hstate = ScannedRNN.initialize_carry(
+            config["NUM_ACTORS"], config["GRU_HIDDEN_DIM"]
+        )
+        cr_init_hstate = ScannedRNN.initialize_carry(
+            config["NUM_ACTORS"], config["GRU_HIDDEN_DIM"]
+        )
 
         # INIT REWARD STANDARDIZATION
         reward_mean, reward_var, reward_count = (
@@ -320,7 +326,7 @@ def make_train(config):
         # TRAIN LOOP
         def _update_step(update_runner_state, unused):
             # COLLECT TRAJECTORIES
-            runner_state, update_steps = update_runner_state
+            runner_state, update_steps, eval_metrics = update_runner_state
 
             def _env_step(runner_state, unused):
                 (
@@ -458,7 +464,7 @@ def make_train(config):
 
             advantages, targets = _calculate_gae(traj_batch, last_val)
 
-            # UPDATE NETWORK
+            # NETWORKS UPDATE
             def _update_epoch(update_state, unused):
                 def _update_minbatch(train_states, batch_info):
                     actor_train_state, critic_train_state = train_states
@@ -626,34 +632,52 @@ def make_train(config):
             loss_info["ratio_0"] = loss_info["ratio"].at[0, 0].get()
             loss_info = jax.tree.map(lambda x: x.mean(), loss_info)
 
+            # UPDATE METRICS
             train_states = update_state[0]
-            metric = traj_batch.info
-            metric = jax.tree.map(
+            metrics = traj_batch.info
+            metrics = jax.tree.map(
                 lambda x: x.reshape(
                     (config["NUM_STEPS"], config["NUM_ENVS"], env.num_agents)
                 ),
                 traj_batch.info,
             )
-            metric["loss"] = loss_info
+            metrics["loss"] = loss_info
             rng = update_state[-1]
 
-            def callback(metric):
-                wandb.log(
-                    {
-                        # the metrics have an agent dimension, but this is identical
-                        # for all agents so index into the 0th item of that dimension.
-                        "returns": metric["returned_episode_returns"][:, :, 0][
-                            metric["returned_episode"][:, :, 0]
-                        ].mean(),
-                        "env_step": metric["update_steps"]
-                        * config["NUM_ENVS"]
-                        * config["NUM_STEPS"],
-                        **metric["loss"],
-                    }
+            # EVALUATION
+            if config.get("TEST_DURING_TRAINING", True):
+                rng, _rng = jax.random.split(rng)
+                eval_metrics = jax.lax.cond(
+                    update_steps % int(config["NUM_UPDATES"] * config["TEST_INTERVAL"])
+                    == 0,
+                    lambda _: get_greedy_metrics(_rng, train_states),
+                    lambda _: eval_metrics,
+                    operand=None,
                 )
+                metrics.update({"test_" + k: v for k, v in eval_metrics.items()})
 
-            metric["update_steps"] = update_steps
-            jax.experimental.io_callback(callback, None, metric)
+            # report on wandb if required
+            if config["WANDB_MODE"] != "disabled":
+
+                def callback(metrics, original_seed):
+                    if config.get("WANDB_LOG_ALL_SEEDS", False):
+                        metrics.update(
+                            {
+                                f"rng{int(original_seed)}/{k}": v
+                                for k, v in metrics.items()
+                            }
+                        )
+                    # Filter the dictionary to only include keys in METRICS_TO_LOG
+                    filtered_metrics = {
+                        key: metrics[key]
+                        for key in config["METRICS_TO_LOG"]
+                        if key in metrics
+                    }
+                    wandb.log(filtered_metrics)
+
+                jax.debug.callback(callback, metrics, original_seed)
+
+            metrics["update_steps"] = update_steps
             update_steps = update_steps + 1
             runner_state = (
                 train_states,
@@ -664,8 +688,85 @@ def make_train(config):
                 reward_standardization,
                 rng,
             )
-            return (runner_state, update_steps), metric
+            return (runner_state, update_steps, eval_metrics), metrics
 
+        def get_greedy_metrics(rng, train_states):
+            """Help function to test greedy policy during training"""
+            if not config.get("TEST_DURING_TRAINING", True):
+                return None
+
+            config["TEST_NUM_ACTORS"] = config["TEST_NUM_ENVS"] * env.num_agents
+
+            def _greedy_env_step(step_state, unused):
+                train_states, env_state, last_obs, last_done, ac_hstate, rng = (
+                    step_state
+                )
+
+                # SELECT ACTION
+                rng, _rng = jax.random.split(rng)
+                obs_batch = batchify(last_obs, env.agents, config["TEST_NUM_ACTORS"])
+                ac_in = (
+                    obs_batch[np.newaxis, :],
+                    last_done[np.newaxis, :],
+                )
+                ac_hstate, pi = actor_network.apply(
+                    train_states[0].params, ac_hstate, ac_in
+                )
+                action = pi.sample(seed=_rng)
+                env_act = unbatchify(
+                    action, env.agents, config["TEST_NUM_ENVS"], env.num_agents
+                )
+                env_act = {k: v.squeeze() for k, v in env_act.items()}
+
+                # STEP ENV
+                rng, _rng = jax.random.split(rng)
+                rng_step = jax.random.split(_rng, config["TEST_NUM_ENVS"])
+                obsv, env_state, rewards, dones, infos = jax.vmap(
+                    env.step, in_axes=(0, 0, 0)
+                )(rng_step, env_state, env_act)
+                info = jax.tree.map(
+                    lambda x: x.reshape((config["TEST_NUM_ACTORS"])), infos
+                )
+                done_batch = batchify(
+                    dones, env.agents, config["TEST_NUM_ACTORS"]
+                ).squeeze()
+
+                step_state = (train_states, env_state, obsv, done_batch, ac_hstate, rng)
+                return step_state, (rewards, dones, infos)
+
+            reset_rng = jax.random.split(_rng, config["TEST_NUM_ENVS"])
+            init_obs, env_state = jax.vmap(env.reset, in_axes=(0,))(reset_rng)
+            ac_init_hstate = ScannedRNN.initialize_carry(
+                config["TEST_NUM_ACTORS"], config["GRU_HIDDEN_DIM"]
+            )
+            done_batch = jnp.zeros((config["TEST_NUM_ACTORS"],), dtype=jnp.bool_)
+            step_state = (
+                train_states,
+                env_state,
+                init_obs,
+                done_batch,
+                ac_init_hstate,
+                rng,
+            )
+            step_state, (rewards, dones, infos) = jax.lax.scan(
+                _greedy_env_step, step_state, None, config["TEST_NUM_STEPS"]
+            )
+            metrics = jax.tree.map(
+                lambda x: jnp.nanmean(
+                    jnp.where(
+                        infos["returned_episode"],
+                        x,
+                        jnp.nan,
+                    )
+                ),
+                infos,
+            )
+            return metrics
+
+        rng, _rng = jax.random.split(rng)
+        eval_metrics = get_greedy_metrics(_rng, (actor_train_state, critic_train_state))
+
+        # train
         rng, _rng = jax.random.split(rng)
         runner_state = (
             (actor_train_state, critic_train_state),
@@ -676,18 +777,25 @@ def make_train(config):
             (reward_mean, reward_var, reward_count),
             _rng,
         )
-        runner_state, metric = jax.lax.scan(
-            _update_step, (runner_state, 0), None, config["NUM_UPDATES"]
+        runner_state, metrics = jax.lax.scan(
+            _update_step, (runner_state, 0, eval_metrics), None, config["NUM_UPDATES"]
         )
-        return {"runner_state": runner_state, "metrics": metric}
+        return {"runner_state": runner_state, "metrics": metrics}
 
     return train
 
 
-@hydra.main(version_base=None, config_path="config", config_name="mappo_rnn_road_env")
-def main(config):
+def env_from_config(config):
+    env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
+    env = RoadEnvWorldStateWrapper(env)
+    env = LogWrapper(env)
+    return env, config["ENV_NAME"]
 
-    config = OmegaConf.to_container(config)
+
+def single_run(config):
+
+    env, env_name = env_from_config(copy.deepcopy(config))
+    alg_name = config["ALG_NAME"]
 
     wandb.init(
         entity=config["ENTITY"],
@@ -697,23 +805,92 @@ def main(config):
         mode=config["WANDB_MODE"],
     )
     rng = jax.random.PRNGKey(config["SEED"])
-    with jax.disable_jit(False):
-        train_jit = jax.jit(make_train(config))
-        out = train_jit(rng)
 
-    # shape: (num_updates, num_envs)
-    returns = (
-        out["metrics"]["returned_episode_returns"][:, -1, :, 0].mean(axis=-1) / 1e6
-    )
+    rngs = jax.random.split(rng, config["NUM_SEEDS"])
+    train_vjit = jax.jit(jax.vmap(make_train(config, env)))
+    outs = jax.block_until_ready(train_vjit(rngs))
+
+    ## Plotting
 
     import matplotlib.pyplot as plt
 
-    plt.plot(returns)
+    plt.plot(outs["metrics"]["test_returned_episode_returns"].T / 1e6)
     plt.xlabel("Updates")
     plt.ylabel("Returns")
     plt.title("MAPPO with RNN on RoadEnv")
     plt.savefig("mappo_rnn_road_env.png", dpi=300)
     plt.show()
+
+    # save model params
+    if config.get("SAVE_PATH", None) is not None:
+        from jaxmarl.wrappers.baselines import save_params
+
+        model_state = outs["runner_state"][0]
+        save_dir = os.path.join(config["SAVE_PATH"], env_name)
+        os.makedirs(save_dir, exist_ok=True)
+        OmegaConf.save(
+            config,
+            os.path.join(
+                save_dir, f'{alg_name}_{env_name}_seed{config["SEED"]}_config.yaml'
+            ),
+        )
+
+        for i, rng in enumerate(rngs):
+            params = jax.tree.map(lambda x: x[i], model_state.params)
+            save_path = os.path.join(
+                save_dir,
+                f'{alg_name}_{env_name}_seed{config["SEED"]}_vmap{i}.safetensors',
+            )
+            save_params(params, save_path)
+
+
+def tune(default_config):
+    """Hyperparameter sweep with wandb."""
+
+    env, env_name = env_from_config(copy.deepcopy(default_config))
+    alg_name = default_config["ALG_NAME"]
+
+    def wrapped_make_train():
+        wandb.init(project=default_config["PROJECT"])
+
+        # update the default params
+        config = copy.deepcopy(default_config)
+        for k, v in dict(wandb.config).items():
+            config[k] = v
+
+        rng = jax.random.PRNGKey(config["SEED"])
+        rngs = jax.random.split(rng, config["NUM_SEEDS"])
+        train_vjit = jax.jit(jax.vmap(make_train(config, env)))
+        outs = jax.block_until_ready(train_vjit(rngs))
+
+    sweep_config = {
+        "name": f"{alg_name}_{env_name}",
+        "method": "bayes",
+        "metric": {
+            "name": "test_returned_episode_returns",
+            "goal": "maximize",
+        },
+        "parameters": {
+            "LR": {"values": [0.001, 0.005]},
+        },
+    }
+
+    wandb.login()
+    sweep_id = wandb.sweep(
+        sweep_config, entity=default_config["ENTITY"], project=default_config["PROJECT"]
+    )
+    wandb.agent(sweep_id, wrapped_make_train, count=300)
+
+
+@hydra.main(version_base=None, config_path="config", config_name="mappo_rnn_road_env")
+def main(config):
+
+    config = OmegaConf.to_container(config)
+    print("Config:\n", OmegaConf.to_yaml(config))
+    if config["HYP_TUNE"]:
+        tune(config)
+    else:
+        single_run(config)
 
 
 if __name__ == "__main__":
