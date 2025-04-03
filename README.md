@@ -2,15 +2,16 @@
 
 ## Installation
 
-##### 1. Clone this repository
+### 1. Clone this repository
 
-The imp-act repository is included as a submodule. To clone this repository and its submodules, run:
+To clone the this repository and the imp-act repository, run:
 ```bash
-git clone --recurse-submodules -j8 https://github.com/AI-for-Infrastructure-Management/imp-act-JaxMARL.git
-cd imp-act-JaxMARL && git submodule update --init --recursive && git checkout imp_act_adaption
+git clone https://github.com/AI-for-Infrastructure-Management/imp-act-JaxMARL.git
+cd imp-act-JaxMARL && git checkout imp_act_adaption
+git clone https://github.com/AI-for-Infrastructure-Management/imp-act.git
 ```
 
-##### 2. Create a virtual environment
+### 2. Create a virtual environment
 
 Option A: Create a conda environment using the environment YAML file,
 ```bash
@@ -24,17 +25,18 @@ Option B: Create a virtual environment `impact-jaxmarl-env` using venv/poetry et
 pip install poetry==1.7.1 lockfile==0.12.2
 ```
 
-##### 3. Install dependencies
+### 3.Install dependencies 
 
-- Install dependencies for JAXMARL using pyproject.toml
+**Option A: CPU version**
+
+- Install dependencies for JaxMARL using pyproject.toml
 ```bash
-pip install -e .[algs]
+pip install -e ".[algs]"
 ```
-If that does not work, try `pip install -e ".[algs]"`
 
 - Install dependencies for imp-act
 ```bash
-cd imp-act && git checkout 99-updating-the-jax-implementation-daniel-dev
+cd imp-act && git checkout 99-updating-the-jax-implementation
 poetry install --with dev,vis,jax
 ```
 <details>
@@ -47,7 +49,31 @@ poetry install --with dev,vis,jax
     ```
 </details>
 
-##### 4. Run the example script
+**Option B: GPU version**
+
+To install the GPU version jax, we need to install the `jax[cuda12]` version. 
+In pyproject.toml, remove "jax==0.4.30" and use "jax[cuda12]==0.4.30" for GPU installation
+
+```bash
+pip install -e ".[algs]"
+
+# check JAX GPU (should return somthing like [cuda(id=0)])
+python -c "import jax; print(jax.devices())"
+```
+
+<details> 
+<summary>vast.ai GPU instance</summary>
+
+Create a GPU instance on vast.ai using this [link](https://cloud.vast.ai?ref_id=113803&template_id=b48cde0d602acbd9d886c815750df9b6),
+
+It uses the `nvidia/cuda:12.6.2-cudnn-devel-ubuntu22.04` and filters GPUs with CUDA >=12.8. After creating an instance, use the above commands for installation.
+
+```bash
+cd imp-act-JaxMARL && conda activate impact-jaxmarl-env
+```
+</details>
+
+### 4. Run the example script
 ```bash
 cd ..
 python getting-started/example_mpe.py

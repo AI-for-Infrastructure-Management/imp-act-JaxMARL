@@ -30,8 +30,10 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "License :: OSI Approved :: Apache Software License",
 ]
+
+# Remove "jax==0.4.30" and use "jax[cuda12]==0.4.30" for GPU installation
 dependencies = [
-  "jax[cuda12]==0.4.30",
+  "jax==0.4.30",
   "jaxlib",
   "flax==0.8.5",
   "safetensors",
