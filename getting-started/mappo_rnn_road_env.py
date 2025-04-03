@@ -849,7 +849,10 @@ def tune(default_config):
     """Hyperparameter sweep with vmap over seeds and hyperparameters."""
 
     ## Define the hyperparameters to search
-    hypers_to_search = {"lr": [0.001, 0.005, 0.0005], "ent_coeff": [0.0]}
+    hypers_to_search = {
+        "lr": [0.001, 0.005, 0.0005],
+        "ent_coeff": [0.0],
+    }
     all_hypers = [jnp.array(v) for v in hypers_to_search.values()]
     # cartesian product of all hyperparameters to create a grid
     # hypers_grid shape: (num_combinations, num_hyperparams)
@@ -884,9 +887,6 @@ def tune(default_config):
     best_hyper = hypers_grid[best_hyper_idx]
 
     print(f"Best hyperparameter: {best_hyper}")
-    print(
-        f"Best hyperparameter mean returns: {test_returns_mean[best_hyper_idx]/1e6:.2f}"
-    )
 
     # plot
     import matplotlib.pyplot as plt
