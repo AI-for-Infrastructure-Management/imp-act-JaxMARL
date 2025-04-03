@@ -7,7 +7,7 @@
 The imp-act repository is included as a submodule. To clone this repository and its submodules, run:
 ```bash
 git clone --recurse-submodules -j8 https://github.com/AI-for-Infrastructure-Management/imp-act-JaxMARL.git
-cd imp-act-JaxMARL && git checkout imp_act_adaption && cd ..
+cd imp-act-JaxMARL && git submodule update --init --recursive && git checkout imp_act_adaption
 ```
 
 ##### 2. Create a virtual environment
@@ -30,7 +30,7 @@ pip install poetry==1.7.1 lockfile==0.12.2
 ```bash
 pip install -e .[algs]
 ```
-If does not work, try `pip install -e ".[algs]"`
+If that does not work, try `pip install -e ".[algs]"`
 
 - Install dependencies for imp-act
 ```bash

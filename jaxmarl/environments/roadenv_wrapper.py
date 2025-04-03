@@ -34,14 +34,16 @@ class RoadEnvironment_Wrapper(object):
         self.env = make(f"{map_name}-jax")
         self.map_name = map_name
         self.num_agents = self.env.total_num_segments
-        self.agents = [f"agent_{i}" for i in range(self.num_agents)]
+        self.agents = [f"agent_{a}" for a in range(self.num_agents)]
         num_damage_states = self.env.num_damage_states
         num_component_actions = len(self.env.action_map)
         self.observation_spaces = {
             agent: Box(low=0, high=1, shape=(num_damage_states + 2 + self.num_agents,))
             for agent in self.agents
         }
-        self.action_spaces = {i: Discrete(num_component_actions) for i in self.agents}
+        self.action_spaces = {
+            agent: Discrete(num_component_actions) for agent in self.agents
+        }
 
     @partial(jax.jit, static_argnums=(0,))
     def reset(self, key: chex.PRNGKey) -> Tuple[Dict[str, chex.Array], State]:
@@ -49,7 +51,7 @@ class RoadEnvironment_Wrapper(object):
 
         _, state = self.env.reset(key)
         obs = self.get_obs(state).astype(jnp.float32)
-        obs = {agent: obs[i] for i, agent in enumerate(self.agents)}
+        obs = {agent: obs[a] for a, agent in enumerate(self.agents)}
 
         state = self.convert_state_to_float32(state)
 
@@ -148,7 +150,7 @@ class RoadEnvironment_Wrapper(object):
     def get_avail_actions(self, state: State = None) -> Dict[str, chex.Array]:
         """Returns the available actions for each agent."""
         num_component_actions = len(self.env.action_map)
-        return {i: list(range(num_component_actions)) for i in range(self.num_agents)}
+        return {agent: list(range(num_component_actions)) for agent in self.agents}
 
     @staticmethod
     def convert_state_to_float32(state):
