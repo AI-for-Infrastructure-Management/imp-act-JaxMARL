@@ -79,12 +79,9 @@ class RoadEnvironment_Wrapper(object):
             obs_re = self.get_obs(states_re)
 
         # Auto-reset environment based on termination
-        states = jax.tree.map(
-            lambda x, y: jax.lax.select(dones["__all__"], x, y), states_re, states_st
-        )
-        obs = jax.tree.map(
-            lambda x, y: jax.lax.select(dones["__all__"], x, y), obs_re, obs_st
-        )
+        states = jax.lax.cond(dones["__all__"],lambda: states_re, lambda: states_st)
+
+        obs = jax.lax.cond(dones["__all__"],lambda: obs_re,lambda: obs_st)
         #! TODO: add infos
         return obs, states, rewards, dones, {}
 
@@ -107,13 +104,14 @@ class RoadEnvironment_Wrapper(object):
         # make obs, reward, done dicts
         # modify the done signal to include the "__all__" key
         obs = {agent: obs[a] for a, agent in enumerate(self.agents)}
-        reward = {agent: reward for a, agent in enumerate(self.agents)}
+        rewards = {agent: reward for a, agent in enumerate(self.agents)}
+        rewards.update({"__all__": reward})
         dones = {agent: done for a, agent in enumerate(self.agents)}
         dones.update({"__all__": done})
 
         next_state = self.convert_state_to_float32(next_state)
 
-        return obs, next_state, reward, dones, info
+        return obs, next_state, rewards, dones, info
 
     def get_obs(self, state: State) -> Dict[str, chex.Array]:
         """
