@@ -1,4 +1,5 @@
 "TOTAL_TIMESTEPS": 1e6
+"NUM_UPDATES": 1500
 "NUM_ENVS": 16
 "NUM_STEPS": 51
 "BUFFER_SIZE": 1e4
@@ -33,9 +34,9 @@
 
 # experiment params
 "NUM_SEEDS": 1 # number of vmapped seeds
-"SEED": 42
+"SEED": "random"
 
-"HYP_TUNE": False # perform hyp tune
+"HYP_TUNE": True # perform hyp tune
 
 # wandb params
 "ENTITY": "imp-act"

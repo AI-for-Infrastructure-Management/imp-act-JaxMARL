@@ -663,6 +663,12 @@ def tune(default_config):
         for k, v in dict(wandb.config).items():
             config[k] = v
 
+        config["TOTAL_TIMESTEPS"] = config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
+
+        config["SEED"] = np.random.randint(0, 2**32 - 1)
+
+        wandb.config.update(config)
+
         print("running experiment with params:", config)
 
         rng = jax.random.PRNGKey(config["SEED"])
@@ -670,8 +676,10 @@ def tune(default_config):
         train_vjit = jax.jit(jax.vmap(make_train(config, env)))
         outs = jax.block_until_ready(train_vjit(rngs))
 
+    map_name = default_config["ENV_KWARGS"].get("map_name", "default")
+
     sweep_config = {
-        "name": f"{alg_name}_{env_name}",
+        "name": f"{alg_name}_{env_name}_{map_name}",
         "method": "bayes",
         "metric": {
             "name": "test_returned_episode_returns",
@@ -680,13 +688,12 @@ def tune(default_config):
         "parameters": {
             "LR": {
                 "values": [
-                    0.0005,
-                    0.0001,
-                    0.00005,
-                    0.00001,
+                    1e-2,
+                    1e-3,
+                    1e-4,
                 ]
             },
-            "NUM_ENVS": {"values": [8, 32, 64, 128]},
+            "NUM_ENVS": {"values": [1, 4, 8, 16]},
             "BUFFER_BATCH_SIZE": {
                 "values": [16, 32, 64, 128],
             },
@@ -694,8 +701,6 @@ def tune(default_config):
                 "values": [
                     10000,
                     20000,
-                    50000,
-                    100000,
                 ]
             },
             "EPS_FINISH": {
@@ -706,6 +711,12 @@ def tune(default_config):
             },
             "HIDDEN_SIZE": {
                 "values": [32, 64, 128],
+            },
+            "GAMMA": {
+                "values": [0.9, 0.99, 1.0],
+            },
+            "TARGET_UPDATE_INTERVAL" : {
+                "values": [8, 16, 32, 64],
             },
         },
     }
