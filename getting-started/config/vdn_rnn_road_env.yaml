@@ -1,18 +1,17 @@
 "TOTAL_TIMESTEPS": 1e6
 "NUM_ENVS": 16
-"NUM_STEPS": 50
-"BUFFER_SIZE": 1e5
+"NUM_STEPS": 51
+"BUFFER_SIZE": 1e4
 "BUFFER_BATCH_SIZE": 32
 "HIDDEN_SIZE": 64
-"NUM_LAYERS": 2
 "EPS_START": 1.0
 "EPS_FINISH": 0.00
 "EPS_DECAY": 0.1 # percentage of updates
 "MAX_GRAD_NORM": 25
-"TARGET_UPDATE_INTERVAL": 200
-"TAU": 1.
+"TARGET_UPDATE_INTERVAL": 15
+"TAU": .9
 "NUM_EPOCHS": 8
-"LR": 5e-5
+"LR": 1e-2
 "LEARNING_STARTS": 10_000 # timesteps
 "LR_LINEAR_DECAY": False
 "GAMMA": 1
@@ -20,6 +19,7 @@
 # ENV
 "ENV_NAME": "road_env"
 "ENV_KWARGS": {"map_name": "ToyExample-v2"}
+"REW_SCALE": 1e-8
 
 # evaluate
 "TEST_DURING_TRAINING": True
@@ -35,11 +35,11 @@
 "NUM_SEEDS": 1 # number of vmapped seeds
 "SEED": 42
 
-"HYP_TUNE": True # perform hyp tune
+"HYP_TUNE": False # perform hyp tune
 
 # wandb params
-"ENTITY": "tum-dh"
-"PROJECT": "jaxmarl"
+"ENTITY": "imp-act"
+"PROJECT": "jaxMARL-vdn"
 "WANDB_MODE": "online"
 "WANDB_LOG_ALL_SEEDS": False # will log separately the vmapped seeds
 

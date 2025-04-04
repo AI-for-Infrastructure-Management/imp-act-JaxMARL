@@ -22,8 +22,6 @@ from jaxmarl import make
 from jaxmarl.environments.smax import map_name_to_scenario
 from jaxmarl.environments.overcooked import overcooked_layouts
 from jaxmarl.wrappers.baselines import (
-    SMAXLogWrapper,
-    MPELogWrapper,
     LogWrapper,
     CTRolloutManager,
 )
@@ -461,7 +459,23 @@ def make_train(config, env):
                 "loss": loss.mean(),
                 "qvals": qvals.mean(),
             }
-            metrics.update(jax.tree.map(lambda x: x.mean(), infos))
+
+            log_wrapper_infos = jax.tree.map(
+                lambda x: jnp.nanmean(
+                    jnp.where(
+                        infos["returned_episode"],
+                        x,
+                        jnp.nan,
+                    )
+                ),
+                {
+                    "returned_episode": infos["returned_episode"], 
+                    "returned_episode_lengths": infos["returned_episode_lengths"],
+                    "returned_episode_returns": infos["returned_episode_returns"],
+                },
+            )
+
+            metrics.update(log_wrapper_infos)
 
             if config.get("TEST_DURING_TRAINING", True):
                 rng, _rng = jax.random.split(rng)
@@ -548,8 +562,13 @@ def make_train(config, env):
                         jnp.nan,
                     )
                 ),
-                infos,
+                {
+                    "returned_episode": infos["returned_episode"], 
+                    "returned_episode_lengths": infos["returned_episode_lengths"],
+                    "returned_episode_returns": infos["returned_episode_returns"],
+                },
             )
+
             return metrics
 
         rng, _rng = jax.random.split(rng)
@@ -575,10 +594,10 @@ def env_from_config(config):
 
 
 def single_run(config):
-    print("Config:\n", OmegaConf.to_yaml(config))
-
     alg_name = config.get("ALG_NAME", "vdn_rnn")
     env, env_name = env_from_config(copy.deepcopy(config))
+
+    map_name = config["ENV_KWARGS"].get("map_name", "default")
 
     wandb.init(
         entity=config["ENTITY"],
@@ -588,7 +607,7 @@ def single_run(config):
             env_name.upper(),
             f"jax_{jax.__version__}",
         ],
-        name=f"{alg_name}_{env_name}",
+        name=f"{alg_name}_{env_name}_{map_name}_{config['SEED']}",
         config=config,
         mode=config["WANDB_MODE"],
     )
@@ -688,9 +707,6 @@ def tune(default_config):
             "HIDDEN_SIZE": {
                 "values": [32, 64, 128],
             },
-            "NUM_LAYERS": {
-                "values": [1, 2, 3],
-            },
         },
     }
 
@@ -704,6 +720,10 @@ def tune(default_config):
 @hydra.main(version_base=None, config_path="./config", config_name="vdn_rnn_road_env")
 def main(config):
     config = OmegaConf.to_container(config)
+
+    if config["SEED"] == "random":
+        config["SEED"] = np.random.randint(0, 2**32 - 1)
+
     print("Config:\n", OmegaConf.to_yaml(config))
     if config["HYP_TUNE"]:
         tune(config)
