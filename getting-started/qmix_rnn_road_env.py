@@ -18,11 +18,7 @@ import flashbax as fbx
 import wandb
 
 from jaxmarl import make
-from jaxmarl.environments.smax import map_name_to_scenario
-from jaxmarl.environments.overcooked import overcooked_layouts
 from jaxmarl.wrappers.baselines import (
-    SMAXLogWrapper,
-    MPELogWrapper,
     LogWrapper,
     CTRolloutManager,
 )
@@ -67,6 +63,10 @@ class RNNQNetwork(nn.Module):
 
     @nn.compact
     def __call__(self, hidden, obs, dones):
+        hidden = hidden.astype(jnp.float32)
+        obs = obs.astype(jnp.float32)
+        dones = dones.astype(jnp.float32)
+
         embedding = nn.Dense(
             self.hidden_dim,
             kernel_init=orthogonal(self.init_scale),
@@ -279,9 +279,10 @@ def make_train(config, env):
         def create_agent(rng):
             init_x = (
                 jnp.zeros(
-                    (1, 1, wrapped_env.obs_size)
+                    (1, 1, wrapped_env.obs_size),
+                    dtype=jnp.float32
                 ),  # (time_step, batch_size, obs_size)
-                jnp.zeros((1, 1)),  # (time_step, batch size)
+                jnp.zeros((1, 1), dtype=jnp.float32),  # (time_step, batch size)
             )
             init_hs = ScannedRNN.initialize_carry(
                 config["HIDDEN_SIZE"], 1
@@ -325,7 +326,7 @@ def make_train(config, env):
 
         # INIT BUFFER
         buffer = fbx.make_trajectory_buffer(
-            max_length_time_axis=config["BUFFER_SIZE"] // config["NUM_ENVS"],
+            max_length_time_axis=int(config["BUFFER_SIZE"] // config["NUM_ENVS"]),
             min_length_time_axis=config["BUFFER_BATCH_SIZE"],
             sample_batch_size=config["BUFFER_BATCH_SIZE"],
             add_batch_size=config["NUM_ENVS"],
@@ -513,8 +514,8 @@ def make_train(config, env):
                 lambda train_state, rng: (
                     (train_state, rng),
                     (
-                        jnp.zeros(config["NUM_EPOCHS"]),
-                        jnp.zeros(config["NUM_EPOCHS"]),
+                        jnp.zeros(config["NUM_EPOCHS"], dtype=jnp.float32),
+                        jnp.zeros(config["NUM_EPOCHS"], dtype=jnp.float32),
                     ),
                 ),  # do nothing
                 train_state,
@@ -544,7 +545,23 @@ def make_train(config, env):
                 "loss": loss.mean(),
                 "qvals": qvals.mean(),
             }
-            metrics.update(jax.tree.map(lambda x: x.mean(), infos))
+            
+            log_wrapper_infos = jax.tree.map(
+                lambda x: jnp.nanmean(
+                    jnp.where(
+                        infos["returned_episode"],
+                        x,
+                        jnp.nan,
+                    )
+                ),
+                {
+                    "returned_episode": infos["returned_episode"], 
+                    "returned_episode_lengths": infos["returned_episode_lengths"],
+                    "returned_episode_returns": infos["returned_episode_returns"],
+                },
+            )
+
+            metrics.update(log_wrapper_infos)
 
             # update the test metrics
             if config.get("TEST_DURING_TRAINING", True):
@@ -567,7 +584,8 @@ def make_train(config, env):
                         metrics.update(
                             {f"rng{int(original_seed)}/{k}": v for k, v in metrics.items()}
                         )
-                    wandb.log(metrics)
+                    metrics_conversion = {k:float(v) for k,v in metrics.items()}
+                    wandb.log(metrics_conversion, step=metrics["update_steps"])
 
                 jax.debug.callback(callback, metrics, original_seed)
 
@@ -652,38 +670,23 @@ def make_train(config, env):
 
 
 def env_from_config(config):
-    env_name = config["ENV_NAME"]
-    # smax init neeeds a scenario
-    if "smax" in env_name.lower():
-        config["ENV_KWARGS"]["scenario"] = map_name_to_scenario(config["MAP_NAME"])
-        env_name = f"{config['ENV_NAME']}_{config['MAP_NAME']}"
-        env = make(config["ENV_NAME"], **config["ENV_KWARGS"])
-        env = SMAXLogWrapper(env)
-    # overcooked needs a layout
-    elif "overcooked" in env_name.lower():
-        env_name = f"{config['ENV_NAME']}_{config['ENV_KWARGS']['layout']}"
-        config["ENV_KWARGS"]["layout"] = overcooked_layouts[
-            config["ENV_KWARGS"]["layout"]
-        ]
-        env = make(config["ENV_NAME"], **config["ENV_KWARGS"])
-        env = LogWrapper(env)
-    elif "mpe" in env_name.lower():
-        env = make(config["ENV_NAME"], **config["ENV_KWARGS"])
-        env = MPELogWrapper(env)
-    else:
-        env = make(config["ENV_NAME"], **config["ENV_KWARGS"])
-        env = LogWrapper(env)
-    return env, env_name
+    env = make(config["ENV_NAME"], **config["ENV_KWARGS"])
+    env = LogWrapper(env)
+    return env, config["ENV_NAME"]
 
 
 def single_run(config):
-
-    config = {**config, **config["alg"]}  # merge the alg config with the main config
-    print("Config:\n", OmegaConf.to_yaml(config))
-
     alg_name = config.get("ALG_NAME", "qmix_rnn")
     env, env_name = env_from_config(copy.deepcopy(config))
 
+    config["TOTAL_TIMESTEPS"] = (
+        config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
+    )
+
+    map_name = config["ENV_KWARGS"].get("map_name", "default")
+    if config["SEED"] == "random":
+        config["SEED"] = np.random.randint(0, 2**32 - 1)
+    
     wandb.init(
         entity=config["ENTITY"],
         project=config["PROJECT"],
@@ -692,7 +695,7 @@ def single_run(config):
             env_name.upper(),
             f"jax_{jax.__version__}",
         ],
-        name=f"{alg_name}_{env_name}",
+        name=f"{alg_name}_{env_name}_{map_name}_{config['SEED']}",
         config=config,
         mode=config["WANDB_MODE"],
     )
@@ -728,8 +731,6 @@ def single_run(config):
 
 def tune(default_config):
     """Hyperparameter sweep with wandb."""
-
-    default_config = {**default_config, **default_config["alg"]}  # merge the alg config with the main config
     env_name = default_config["ENV_NAME"]
     alg_name = default_config.get("ALG_NAME", "qmix_rnn")
     env, env_name = env_from_config(default_config)
@@ -777,7 +778,7 @@ def tune(default_config):
     wandb.agent(sweep_id, wrapped_make_train, count=300)
 
 
-@hydra.main(version_base=None, config_path="./config", config_name="config")
+@hydra.main(version_base=None, config_path="./config", config_name="qmix_rnn_road_env")
 def main(config):
     config = OmegaConf.to_container(config)
     print("Config:\n", OmegaConf.to_yaml(config))
