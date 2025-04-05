@@ -864,6 +864,10 @@ def single_run(config):
 def tune(default_config):
     """Hyperparameter sweep with vmap over seeds and hyperparameters."""
 
+    import time
+
+    start_time = time.time()
+
     ## Define the hyperparameters to search
     hypers_to_search = {
         "lr": [0.001, 0.005, 0.0005],
@@ -893,16 +897,32 @@ def tune(default_config):
     num_combinations, num_seeds, num_updates = test_returns.shape
 
     # Aggregate over seeds
-    # shape: (num_hyperparams, num_updates)
+    # shape: (num_combinations, num_updates)
     test_returns_mean = jnp.mean(test_returns, axis=1)
     test_returns_std = jnp.std(test_returns, axis=1)
 
-    # get the best hyperparameter
+    # get the best hyperparameter(s)
     test_returns_max = jnp.max(test_returns_mean, axis=1)
-    best_hyper_idx = jnp.argmax(test_returns_max)
-    best_hyper = hypers_grid[best_hyper_idx]
+    idx_best_comb = jnp.argmax(test_returns_max)
+    best_hyper = hypers_grid[idx_best_comb]
 
-    print(f"Best hyperparameter: {best_hyper}")
+    # print results
+    print("-" * 50)
+    print(f"Best combination: {best_hyper}, index: {idx_best_comb}")
+    print(f"Best combination mean: {test_returns_mean[idx_best_comb].mean():.2f}")
+    print(f"Best combination std: {test_returns_std[idx_best_comb].mean():.2f}")
+
+    print()
+    print("Summary of all combinations:")
+    print("-" * 25)
+    print(f"# combinations: {num_combinations}")
+    print(f"# seeds (per combination): {num_seeds}")
+    print("Hyperparameters grid:")
+    for i, hyp in enumerate(hypers_grid):
+        _label = [f"{k}: {v}" for k, v in zip(hypers_to_search.keys(), hyp)]
+        print(
+            f"{i}: {_label} | mean: {test_returns_mean[i].mean():.2f}, std: {test_returns_std[i].mean():.2f}"
+        )
 
     # plot
     import matplotlib.pyplot as plt
@@ -920,10 +940,15 @@ def tune(default_config):
             alpha=0.2,
         )
     plt.title(f"Hyperparameter Search | ENV: {env_name}, ALG:{alg_name}")
-    plt.xlabel("Updates")
+    plt.xlabel("Eval Chckpts")
     plt.ylabel("Returns")
     plt.legend()
+    plt.savefig("hypers.png", dpi=300)
     plt.show()
+
+    total_time = time.time() - start_time
+
+    print(f"Total time:{total_time:.2f}")
 
 
 @hydra.main(version_base=None, config_path="config", config_name="mappo_rnn_road_env")
