@@ -504,7 +504,7 @@ def make_train(config, env):
 
             runner_state = (train_state, buffer_state, test_state, rng)
 
-            return runner_state, metrics
+            return runner_state, None
 
         def get_greedy_metrics(rng, train_state):
             """Help function to test greedy policy during training"""
@@ -599,6 +599,13 @@ def single_run(config):
 
     map_name = config["ENV_KWARGS"].get("map_name", "default")
 
+    config["TOTAL_TIMESTEPS"] = (
+        config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
+    )
+
+    if config["SEED"] == "random":
+        config["SEED"] = np.random.randint(0, 2**32 - 1)
+
     wandb.init(
         entity=config["ENTITY"],
         project=config["PROJECT"],
@@ -665,13 +672,17 @@ def tune(default_config):
 
         config["TOTAL_TIMESTEPS"] = config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
 
-        config["SEED"] = np.random.randint(0, 2**32 - 1)
-
+        if config["SEED"] == "random":
+            seed = np.random.randint(0, 2**32 - 1)
+            config["SAMPLED_SEED"] = seed
+        else:
+            seed = config["SEED"]
+        
         wandb.config.update(config)
 
         print("running experiment with params:", config)
 
-        rng = jax.random.PRNGKey(config["SEED"])
+        rng = jax.random.PRNGKey(seed)
         rngs = jax.random.split(rng, config["NUM_SEEDS"])
         train_vjit = jax.jit(jax.vmap(make_train(config, env)))
         outs = jax.block_until_ready(train_vjit(rngs))
@@ -704,7 +715,7 @@ def tune(default_config):
                 ]
             },
             "EPS_FINISH": {
-                "values": [0.5, 0.01, 0.001, 0],
+                "values": [0.05, 0.01, 0.001, 0],
             },
             "NUM_EPOCHS": {
                 "values": [1, 2, 4, 8],
@@ -731,9 +742,6 @@ def tune(default_config):
 @hydra.main(version_base=None, config_path="./config", config_name="vdn_rnn_road_env")
 def main(config):
     config = OmegaConf.to_container(config)
-
-    if config["SEED"] == "random":
-        config["SEED"] = np.random.randint(0, 2**32 - 1)
 
     print("Config:\n", OmegaConf.to_yaml(config))
     if config["HYP_TUNE"]:
