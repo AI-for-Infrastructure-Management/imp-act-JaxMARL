@@ -102,23 +102,23 @@ class RoadEnvironment_Wrapper(object):
         state = self.convert_state_to_float64(state)
 
         _, next_state, reward, done, info = self.env.step_env(key, state, array_actions)
-        obs = self.get_obs(state).astype(jnp.float32)
-        global_state = self.get_global_state(obs, state).astype(jnp.float32)
+        next_obs = self.get_obs(next_state).astype(jnp.float32)
+        global_state = self.get_global_state(next_obs, next_state).astype(jnp.float32)
         reward = reward.astype(jnp.float32)
 
-        # make obs, reward, done dicts
+        # make next_obs, reward, done dicts
         # modify the done signal to include the "__all__" key
-        obs = {agent: obs[a] for a, agent in enumerate(self.agents)}
+        next_obs = {agent: next_obs[a] for a, agent in enumerate(self.agents)}
         reward = {agent: reward for a, agent in enumerate(self.agents)}
         dones = {agent: done for a, agent in enumerate(self.agents)}
-        obs.update({"__all__": global_state})
+        next_obs.update({"__all__": global_state})
         dones.update({"__all__": done})
 
         next_state = self.convert_state_to_float32(next_state)
 
-        return obs, next_state, reward, dones, info
+        return next_obs, next_state, reward, dones, info
 
-    def get_obs(self, state: State) -> Dict[str, chex.Array]:
+    def get_obs(self, state: State) -> chex.Array:
         """
         Applies observation function to state.
         Returns the observation for each agent as an array.
