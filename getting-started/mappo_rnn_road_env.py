@@ -48,16 +48,10 @@ class RoadEnvWorldStateWrapper(JaxMARLWrapper):
 
     @partial(jax.jit, static_argnums=0)
     def world_state_fn(self, obs, state):
-        all_obs = jnp.array([obs[agent][:-12] for agent in self._env.agents]).flatten()
-        all_obs = jnp.expand_dims(all_obs, axis=0).repeat(self._env.num_agents, axis=0)
-        return all_obs
+        return obs["__all__"][None].repeat(self._env.num_agents, axis=0)
 
     def world_state_size(self):
-        dims = [
-            self._env.observation_space(a).shape[0] - self._env.num_agents
-            for a in self._env.agents
-        ]
-        return sum(dims)
+        return self._env.world_state_size
 
 
 class ScannedRNN(nn.Module):

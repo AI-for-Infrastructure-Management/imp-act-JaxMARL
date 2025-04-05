@@ -37,6 +37,7 @@ class RoadEnvironment_Wrapper(object):
         self.agents = [f"agent_{i}" for i in range(self.num_agents)]
         num_damage_states = self.env.num_damage_states
         num_component_actions = len(self.env.action_map)
+        self.world_state_size = self.num_agents * num_damage_states + 2
         self.observation_spaces = {
             agent: Box(low=0, high=1, shape=(num_damage_states + 2 + self.num_agents,))
             for agent in self.agents
@@ -49,7 +50,9 @@ class RoadEnvironment_Wrapper(object):
 
         _, state = self.env.reset(key)
         obs = self.get_obs(state).astype(jnp.float32)
+        global_state = self.get_global_state(obs, state).astype(jnp.float32)
         obs = {agent: obs[i] for i, agent in enumerate(self.agents)}
+        obs.update({"__all__": global_state})
 
         state = self.convert_state_to_float32(state)
 
@@ -100,6 +103,7 @@ class RoadEnvironment_Wrapper(object):
 
         _, next_state, reward, done, info = self.env.step_env(key, state, array_actions)
         obs = self.get_obs(state).astype(jnp.float32)
+        global_state = self.get_global_state(obs, state).astype(jnp.float32)
         reward = reward.astype(jnp.float32)
 
         # make obs, reward, done dicts
@@ -107,6 +111,7 @@ class RoadEnvironment_Wrapper(object):
         obs = {agent: obs[a] for a, agent in enumerate(self.agents)}
         reward = {agent: reward for a, agent in enumerate(self.agents)}
         dones = {agent: done for a, agent in enumerate(self.agents)}
+        obs.update({"__all__": global_state})
         dones.update({"__all__": done})
 
         next_state = self.convert_state_to_float32(next_state)
@@ -127,8 +132,9 @@ class RoadEnvironment_Wrapper(object):
         return jnp.concatenate([state.belief, _timestep, _budget, _id], axis=1)
 
     def get_global_state(self, obs, state: State) -> Dict[str, chex.Array]:
-        # TODO: implement this function
-        raise NotImplementedError
+        _timestep = jnp.array([state.timestep / self.env.max_timesteps])
+        _budget = jnp.array([state.budget_remaining / self.env.budget_amount])
+        return jnp.concatenate([state.belief.flatten(), _timestep, _budget], axis=0)
 
     def observation_space(self, agent=None):
         """
