@@ -656,14 +656,24 @@ def make_train(config):
             # EVALUATION
             if config.get("TEST_DURING_TRAINING", True):
                 rng, _rng = jax.random.split(rng)
+
+                def eval_and_store_returns(rng, train_states):
+                    val = get_greedy_metrics(rng, train_states)[
+                        "returned_episode_returns"
+                    ]
+                    idx = update_steps // int(
+                        config["NUM_UPDATES"] * config["TEST_INTERVAL"]
+                    )
+                    return eval_metrics.at[idx].set(val)
+
                 eval_metrics = jax.lax.cond(
                     update_steps % int(config["NUM_UPDATES"] * config["TEST_INTERVAL"])
                     == 0,
-                    lambda _: get_greedy_metrics(_rng, train_states),
+                    lambda _: eval_and_store_returns(_rng, train_states),
                     lambda _: eval_metrics,
                     operand=None,
                 )
-                metrics.update({"test_" + k: v for k, v in eval_metrics.items()})
+                # metrics.update({"test_" + k: v for k, v in eval_metrics.items()})
 
             # report on wandb if required
             if config["WANDB_MODE"] != "disabled":
@@ -773,7 +783,10 @@ def make_train(config):
             return metrics
 
         rng, _rng = jax.random.split(rng)
-        eval_metrics = get_greedy_metrics(_rng, (actor_train_state, critic_train_state))
+
+        # Storing evaluation metrics on CPU to save GPU memory
+        num_evals = int(1 / config["TEST_INTERVAL"])
+        initial_eval_metrics = jnp.zeros((num_evals,), device="cpu")
 
         # train
         rng, _rng = jax.random.split(rng)
@@ -787,9 +800,12 @@ def make_train(config):
             _rng,
         )
         runner_state, metrics = jax.lax.scan(
-            _update_step, (runner_state, 0, eval_metrics), None, config["NUM_UPDATES"]
+            _update_step,
+            (runner_state, 0, initial_eval_metrics),
+            None,
+            config["NUM_UPDATES"],
         )
-        return {"runner_state": runner_state, "metrics": metrics}
+        return {"runner_state": runner_state, "metrics": None}
 
     return train
 
@@ -873,7 +889,7 @@ def tune(default_config):
     # outs shape: (num_combinations, num_seeds, num_updates)
     outs = jax.block_until_ready(train_vjit(*hypers_split, rngs))
 
-    test_returns = outs["metrics"]["test_returned_episode_returns"]
+    test_returns = outs["runner_state"][-1] / 1e6
     num_combinations, num_seeds, num_updates = test_returns.shape
 
     # Aggregate over seeds
