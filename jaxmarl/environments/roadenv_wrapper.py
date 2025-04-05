@@ -123,8 +123,8 @@ class RoadEnvironment_Wrapper(object):
         N = self.env.total_num_segments
         _timestep = jnp.full((N, 1), state.timestep / self.env.max_timesteps)
         _budget = jnp.full((N, 1), state.budget_remaining / self.env.budget_amount)
-        _id = jnp.eye(N, dtype=jnp.float32)
-        return jnp.concatenate([state.belief, _timestep, _budget, _id], axis=1)
+        # _id = jnp.eye(N, dtype=jnp.float32) # id will be appended by the CTRolloutmanager
+        return jnp.concatenate([state.belief, _timestep, _budget], axis=1)
 
     def get_global_state(self, obs, state: State) -> Dict[str, chex.Array]:
         # TODO: implement this function
