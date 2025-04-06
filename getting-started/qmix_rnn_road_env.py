@@ -585,6 +585,9 @@ def make_train(config, env):
                 "grad_steps": train_state.grad_steps,
                 "loss": loss.mean(),
                 "qvals": qvals.mean(),
+                "rnorm_mean": rnorm.mean,
+                "rnorm_std": get_std(rnorm),
+                "rnorm_count": rnorm.count,
             }
 
             log_wrapper_infos = jax.tree.map(
