@@ -237,8 +237,8 @@ def make_train(config, env):
             )
             return train_state
 
-        rng, _rng = jax.random.split(rng) ## correct split??
-        train_state = create_agent(rng)
+        rng, _rng = jax.random.split(rng)
+        train_state = create_agent(_rng)
 
         # INIT BUFFER
         # to initalize the buffer is necessary to sample a trajectory to know its strucutre

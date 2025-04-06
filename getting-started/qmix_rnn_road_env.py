@@ -322,7 +322,7 @@ def make_train(config, env):
             return train_state
 
         rng, _rng = jax.random.split(rng)
-        train_state = create_agent(rng)
+        train_state = create_agent(_rng)
 
         # INIT BUFFER
         buffer = fbx.make_trajectory_buffer(
