@@ -228,9 +228,9 @@ def make_train(config, env):
         # INIT ENV
         original_seed = rng[0]
         rng, _rng = jax.random.split(rng)
-        wrapped_env = CTRolloutManager(env, batch_size=config["NUM_ENVS"])
+        wrapped_env = CTRolloutManager(env, batch_size=config["NUM_ENVS"], preprocess_obs=False)
         test_env = CTRolloutManager(
-            env, batch_size=config["TEST_NUM_ENVS"]
+            env, batch_size=config["TEST_NUM_ENVS"], preprocess_obs=False
         )  # batched env for testing (has different batch size)
 
         # to initalize some variables is necessary to sample a trajectory to know its strucutre
@@ -545,7 +545,7 @@ def make_train(config, env):
                 "loss": loss.mean(),
                 "qvals": qvals.mean(),
             }
-            
+
             log_wrapper_infos = jax.tree.map(
                 lambda x: jnp.nanmean(
                     jnp.where(
@@ -743,15 +743,27 @@ def tune(default_config):
         for k, v in dict(wandb.config).items():
             config[k] = v
 
+        config["TOTAL_TIMESTEPS"] = config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
+
+        if config["SEED"] == "random":
+            seed = np.random.randint(0, 2**32 - 1)
+            config["SAMPLED_SEED"] = seed
+        else:
+            seed = config["SEED"]
+        
+        wandb.config.update(config)
+
         print("running experiment with params:", config)
 
-        rng = jax.random.PRNGKey(config["SEED"])
+        rng = jax.random.PRNGKey(seed)
         rngs = jax.random.split(rng, config["NUM_SEEDS"])
         train_vjit = jax.jit(jax.vmap(make_train(config, env)))
         outs = jax.block_until_ready(train_vjit(rngs))
 
+    map_name = default_config["ENV_KWARGS"].get("map_name", "default")
+
     sweep_config = {
-        "name": f"{alg_name}_{env_name}",
+        "name": f"{alg_name}_{env_name}_{map_name}",
         "method": "bayes",
         "metric": {
             "name": "test_returned_episode_returns",
@@ -760,15 +772,53 @@ def tune(default_config):
         "parameters": {
             "LR": {
                 "values": [
-                    0.005,
-                    0.001,
-                    0.0005,
-                    0.0001,
-                    0.00005,
+                    1e-1,
+                    1e-2,
+                    1e-3,
+                    1e-4,
                 ]
             },
-            "NUM_ENVS": {"values": [8, 32, 64, 128]},
-        },
+            "NUM_ENVS": {"values": [1, 4, 8, 16]},
+            "BUFFER_BATCH_SIZE": {
+                "values": [16, 32, 64, 128],
+            },
+            "BUFFER_SIZE": {
+                "values": [
+                    5000,
+                    10000,
+                ]
+            },
+            "EPS_FINISH": {
+                "values": [0.05, 0.01, 0.001, 0],
+            },
+            "NUM_EPOCHS": {
+                "values": [1, 2, 4, 8],
+            },
+            "HIDDEN_SIZE": {
+                "values": [32, 64, 128],
+            },
+            "GAMMA": {
+                "values": [0.9, 0.99, 1.0],
+            },
+            "TARGET_UPDATE_INTERVAL" : {
+                "values": [8, 16, 32, 64],
+            },
+            "MIXER_EMBEDDING_DIM": {
+                "values": [32, 64, 128],
+            },
+            "MIXER_HYPERNET_HIDDEN_DIM": {
+                "values": [32, 64, 128],
+            },
+            "MIXER_INIT_SCALE": {
+                "values": [0.0001, 0.001, 0.01],
+            },
+            "REW_SCALE": {
+                "values": [1e-8, 5e-8, 1e-9],
+            },
+            "TAU": {
+                "values": [1, 0.99, 0.9],
+            }
+        }
     }
 
     wandb.login()
