@@ -103,6 +103,38 @@ class CustomTrainState(TrainState):
     n_updates: int = 0
     grad_steps: int = 0
 
+@chex.dataclass
+class RunningStats:
+    count: jnp.ndarray  # or float32
+    mean: jnp.ndarray
+    M2: jnp.ndarray
+
+def init_running_stats():
+    return RunningStats(
+        count=jnp.array(0.0, dtype=jnp.float32),
+        mean=jnp.array(0.0, dtype=jnp.float32),
+        M2=jnp.array(0.0, dtype=jnp.float32),
+    )
+
+def update_running_stats(stats: RunningStats, x: jnp.ndarray) -> RunningStats:
+    x = x.astype(jnp.float32)        # if x might be float64
+    batch_count = x.size
+    batch_sum = jnp.sum(x)
+    batch_mean = batch_sum / batch_count
+    batch_var = jnp.mean((x - batch_mean) ** 2)
+    batch_M2 = batch_var * batch_count
+
+    new_count = stats.count + jnp.asarray(batch_count, dtype=jnp.float32)
+    new_mean = (stats.count * stats.mean + batch_sum) / new_count
+    new_M2 = (
+        stats.M2
+        + batch_M2
+        + (stats.count * batch_count * (stats.mean - batch_mean) ** 2) / new_count
+    )
+    return RunningStats(count=new_count, mean=new_mean, M2=new_M2)
+
+def get_std(stats: RunningStats) -> jnp.ndarray:
+    return jnp.sqrt(stats.M2 / (stats.count + 1e-8))
 
 def make_train(config, env):
 
@@ -205,7 +237,7 @@ def make_train(config, env):
             )
             return train_state
 
-        rng, _rng = jax.random.split(rng)
+        rng, _rng = jax.random.split(rng) ## correct split??
         train_state = create_agent(rng)
 
         # INIT BUFFER
@@ -252,7 +284,7 @@ def make_train(config, env):
         # TRAINING LOOP
         def _update_step(runner_state, unused):
 
-            train_state, buffer_state, test_state, rng = runner_state
+            train_state, buffer_state, test_state, rng, rnorm = runner_state
 
             # SAMPLE PHASE
             def _step_env(carry, _):
@@ -283,6 +315,12 @@ def make_train(config, env):
                 actions = jax.vmap(eps_greedy_exploration, in_axes=(0, 0, None, 0))(
                     _rngs, q_vals, eps, batchify(avail_actions)
                 )
+
+                # Replace all actions with 0
+                # actions = jax.tree.map(lambda x: jnp.zeros_like(x), actions)
+                # actions = jax.tree.map(lambda x: jnp.full_like(x, 2), actions)
+
+                # jax.debug.breakpoint()
                 actions = unbatchify(actions)
 
                 new_obs, new_env_state, rewards, dones, infos = wrapped_env.batch_step(
@@ -332,8 +370,7 @@ def make_train(config, env):
 
             # NETWORKS UPDATE
             def _learn_phase(carry, _):
-
-                train_state, rng = carry
+                train_state, rng, rnorm = carry
                 rng, _rng = jax.random.split(rng)
                 minibatch = buffer.sample(buffer_state, _rng).experience
                 minibatch = jax.tree.map(
@@ -363,6 +400,14 @@ def make_train(config, env):
                     _dones,
                 )  # (num_agents, timesteps, batch_size, num_actions)
 
+                # --- REWARD STANDARDIZATION ---
+                rewards = minibatch.rewards["__all__"][:-1]
+                rewards_flat = jnp.ravel(rewards)
+                new_rnorm = update_running_stats(rnorm, rewards_flat)
+                std = get_std(new_rnorm)
+                rewards_norm = (rewards - new_rnorm.mean) / (std + 1e-8)
+                # --- REWARD STANDARDIZATION END ---
+
                 def _loss_fn(params):
                     _, q_vals = jax.vmap(network.apply, in_axes=(None, 0, 0, 0))(
                         params,
@@ -389,7 +434,8 @@ def make_train(config, env):
                     ).squeeze(-1)  # (num_agents, timesteps, batch_size,)
 
                     vdn_target = (
-                        minibatch.rewards["__all__"][:-1]
+                        # minibatch.rewards["__all__"][:-1]
+                        rewards_norm
                         + (
                             1 - minibatch.dones["__all__"][:-1]
                         )  # use next done because last done was saved for rnn re-init
@@ -411,7 +457,7 @@ def make_train(config, env):
                 train_state = train_state.replace(
                     grad_steps=train_state.grad_steps + 1,
                 )
-                return (train_state, rng), (loss, qvals)
+                return (train_state, rng, new_rnorm), (loss, qvals)
 
             rng, _rng = jax.random.split(rng)
             is_learn_time = (
@@ -419,13 +465,13 @@ def make_train(config, env):
             ) & (  # enough experience in buffer
                 train_state.timesteps > config["LEARNING_STARTS"]
             )
-            (train_state, rng), (loss, qvals) = jax.lax.cond(
+            (train_state, rng, rnorm), (loss, qvals) = jax.lax.cond(
                 is_learn_time,
-                lambda train_state, rng: jax.lax.scan(
-                    _learn_phase, (train_state, rng), None, config["NUM_EPOCHS"]
+                lambda train_state, rng, rnorm: jax.lax.scan(
+                    _learn_phase, (train_state, rng, rnorm), None, config["NUM_EPOCHS"]
                 ),
-                lambda train_state, rng: (
-                    (train_state, rng),
+                lambda train_state, rng, rnorm: (
+                    (train_state, rng, rnorm),
                     (
                         jnp.zeros(config["NUM_EPOCHS"], dtype=jnp.float32),
                         jnp.zeros(config["NUM_EPOCHS"], dtype=jnp.float32),
@@ -433,6 +479,7 @@ def make_train(config, env):
                 ),  # do nothing
                 train_state,
                 _rng,
+                rnorm,
             )
 
             # update target network
@@ -502,7 +549,7 @@ def make_train(config, env):
 
                 jax.debug.callback(callback, metrics, original_seed)
 
-            runner_state = (train_state, buffer_state, test_state, rng)
+            runner_state = (train_state, buffer_state, test_state, rng, rnorm)
 
             return runner_state, None
 
@@ -526,6 +573,9 @@ def make_train(config, env):
                 q_vals = q_vals.squeeze(axis=1)
                 valid_actions = test_env.get_valid_actions(env_state.env_state)
                 actions = get_greedy_actions(q_vals, batchify(valid_actions))
+
+                # actions = jax.tree.map(lambda x: jnp.full_like(x, 2), actions)
+                # actions = jax.tree.map(lambda x: jnp.zeros_like(x), actions)
                 actions = unbatchify(actions)
                 obs, env_state, rewards, dones, infos = test_env.batch_step(
                     key_s, env_state, actions
@@ -576,7 +626,7 @@ def make_train(config, env):
 
         # train
         rng, _rng = jax.random.split(rng)
-        runner_state = (train_state, buffer_state, test_state, _rng)
+        runner_state = (train_state, buffer_state, test_state, _rng, init_running_stats())
 
         runner_state, metrics = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
@@ -595,7 +645,7 @@ def env_from_config(config):
 
 def single_run(config):
     alg_name = config.get("ALG_NAME", "vdn_rnn")
-    env, env_name = env_from_config(copy.deepcopy(config))
+    env, env_name = env_from_config(copy.deepcopy(config))  ## First wrapper (LogWrapper)
 
     map_name = config["ENV_KWARGS"].get("map_name", "default")
 
