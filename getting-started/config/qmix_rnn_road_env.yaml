@@ -36,9 +36,9 @@
 
 # experiment params
 "NUM_SEEDS": 1 # number of vmapped seeds
-"SEED": 4069874027
+"SEED": "random"
 
-"HYP_TUNE": False # perform hyp tune
+"HYP_TUNE": True # perform hyp tune
 
 # wandb params
 "ENTITY": "imp-act"
