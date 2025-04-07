@@ -842,7 +842,7 @@ def tune(default_config):
                 "values": [32, 64, 128],
             },
             "GAMMA": {
-                "values": [0.9, 0.99, 1.0],
+                "values": [0.99, 0.999, 1.0],
             },
             "TARGET_UPDATE_INTERVAL" : {
                 "values": [8, 16, 32, 64],
@@ -857,7 +857,7 @@ def tune(default_config):
                 "values": [0.0001, 0.001, 0.01],
             },
             "REW_SCALE": {
-                "values": [1e-8, 5e-8, 1e-9],
+                "values": [1e-8, 1e-9, 1e-10],
             },
             "TAU": {
                 "values": [1, 0.99, 0.9],
