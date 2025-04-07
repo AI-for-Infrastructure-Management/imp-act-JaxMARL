@@ -27,8 +27,8 @@
 # evaluate
 "TEST_DURING_TRAINING": True
 "TEST_INTERVAL": 0.005 # as a fraction of updates
-"TEST_NUM_STEPS": 51
-"TEST_NUM_ENVS": 1_000
+"TEST_NUM_STEPS": 101
+"TEST_NUM_ENVS": 500
 
 "ALG_NAME": "qmix_rnn"
 
@@ -43,7 +43,7 @@
 # wandb params
 "ENTITY": "imp-act"
 "PROJECT": "jaxMARL-qmix"
-"WANDB_MODE": "offline"
+"WANDB_MODE": "onlione"
 "WANDB_LOG_ALL_SEEDS": False # will log separately the vmapped seeds
 
 # where to save the params (if None, will not save)

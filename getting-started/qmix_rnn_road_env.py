@@ -829,7 +829,7 @@ def tune(default_config):
             "BUFFER_SIZE": {
                 "values": [
                     5000,
-                    10000,
+                    2000,
                 ]
             },
             "EPS_FINISH": {
