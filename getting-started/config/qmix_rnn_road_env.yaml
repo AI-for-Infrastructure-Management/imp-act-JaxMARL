@@ -43,7 +43,7 @@
 # wandb params
 "ENTITY": "imp-act"
 "PROJECT": "jaxMARL-qmix"
-"WANDB_MODE": "onlione"
+"WANDB_MODE": "online"
 "WANDB_LOG_ALL_SEEDS": False # will log separately the vmapped seeds
 
 # where to save the params (if None, will not save)
