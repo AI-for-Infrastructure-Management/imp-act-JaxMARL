@@ -91,9 +91,8 @@ class RoadEnvironment_Wrapper(object):
         """Environment-specific step transition."""
 
         # convert actions dict to array
-        array_actions = jnp.array(
-            jax.tree_util.tree_leaves(actions), dtype=jnp.int32
-        ).squeeze()
+        array_actions = jnp.stack(
+            [actions[agent] for agent in self.agents], dtype=jnp.int32)
 
         state = self.convert_state_to_float64(state)
 
