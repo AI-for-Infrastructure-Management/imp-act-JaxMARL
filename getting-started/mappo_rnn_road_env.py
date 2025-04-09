@@ -48,16 +48,10 @@ class RoadEnvWorldStateWrapper(JaxMARLWrapper):
 
     @partial(jax.jit, static_argnums=0)
     def world_state_fn(self, obs, state):
-        all_obs = jnp.array([obs[agent][:-12] for agent in self._env.agents]).flatten()
-        all_obs = jnp.expand_dims(all_obs, axis=0).repeat(self._env.num_agents, axis=0)
-        return all_obs
+        return obs["__all__"][None].repeat(self._env.num_agents, axis=0)
 
     def world_state_size(self):
-        dims = [
-            self._env.observation_space(a).shape[0] - self._env.num_agents
-            for a in self._env.agents
-        ]
-        return sum(dims)
+        return self._env.world_state_size
 
 
 class ScannedRNN(nn.Module):
@@ -218,7 +212,11 @@ def running_mean_std(mean, var, count, new_data):
     return new_mean, new_var, tot_count
 
 
-def make_train(config, env):
+def make_train(config):
+
+    env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
+    env = RoadEnvWorldStateWrapper(env)
+    env = LogWrapper(env)
 
     config["NUM_ACTORS"] = env.num_agents * config["NUM_ENVS"]
     config["NUM_UPDATES"] = (
@@ -241,7 +239,12 @@ def make_train(config, env):
         )
         return config["LR"] * frac
 
-    def train(rng):
+    def train(lr, ent_coeff, rng):
+
+        # add lr to config
+        config["LR"] = lr
+        config["ENT_COEF"] = ent_coeff
+
         # INIT NETWORK
         actor_network = ActorRNN(env.action_space(env.agents[0]).n, config=config)
         critic_network = CriticRNN(config=config)
@@ -647,14 +650,24 @@ def make_train(config, env):
             # EVALUATION
             if config.get("TEST_DURING_TRAINING", True):
                 rng, _rng = jax.random.split(rng)
+
+                def eval_and_store_returns(rng, train_states):
+                    val = get_greedy_metrics(rng, train_states)[
+                        "returned_episode_returns"
+                    ]
+                    idx = update_steps // int(
+                        config["NUM_UPDATES"] * config["TEST_INTERVAL"]
+                    )
+                    return eval_metrics.at[idx].set(val)
+
                 eval_metrics = jax.lax.cond(
                     update_steps % int(config["NUM_UPDATES"] * config["TEST_INTERVAL"])
                     == 0,
-                    lambda _: get_greedy_metrics(_rng, train_states),
+                    lambda _: eval_and_store_returns(_rng, train_states),
                     lambda _: eval_metrics,
                     operand=None,
                 )
-                metrics.update({"test_" + k: v for k, v in eval_metrics.items()})
+                # metrics.update({"test_" + k: v for k, v in eval_metrics.items()})
 
             # report on wandb if required
             if config["WANDB_MODE"] != "disabled":
@@ -764,7 +777,10 @@ def make_train(config, env):
             return metrics
 
         rng, _rng = jax.random.split(rng)
-        eval_metrics = get_greedy_metrics(_rng, (actor_train_state, critic_train_state))
+
+        # Storing evaluation metrics on CPU to save GPU memory
+        num_evals = int(1 / config["TEST_INTERVAL"])
+        initial_eval_metrics = jnp.zeros((num_evals,), device="cpu")
 
         # train
         rng, _rng = jax.random.split(rng)
@@ -778,24 +794,17 @@ def make_train(config, env):
             _rng,
         )
         runner_state, metrics = jax.lax.scan(
-            _update_step, (runner_state, 0, eval_metrics), None, config["NUM_UPDATES"]
+            _update_step,
+            (runner_state, 0, initial_eval_metrics),
+            None,
+            config["NUM_UPDATES"],
         )
-        return {"runner_state": runner_state, "metrics": metrics}
+        return {"runner_state": runner_state, "metrics": None}
 
     return train
 
 
-def env_from_config(config):
-    env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
-    env = RoadEnvWorldStateWrapper(env)
-    env = LogWrapper(env)
-    return env, config["ENV_NAME"]
-
-
 def single_run(config):
-
-    env, env_name = env_from_config(copy.deepcopy(config))
-    alg_name = config["ALG_NAME"]
 
     wandb.init(
         entity=config["ENTITY"],
@@ -807,7 +816,7 @@ def single_run(config):
     rng = jax.random.PRNGKey(config["SEED"])
 
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
-    train_vjit = jax.jit(jax.vmap(make_train(config, env)))
+    train_vjit = jax.jit(jax.vmap(make_train(config)))
     outs = jax.block_until_ready(train_vjit(rngs))
 
     ## Plotting
@@ -825,6 +834,8 @@ def single_run(config):
     if config.get("SAVE_PATH", None) is not None:
         from jaxmarl.wrappers.baselines import save_params
 
+        env_name = config["ENV_NAME"]
+        alg_name = config["ALG_NAME"]
         model_state = outs["runner_state"][0]
         save_dir = os.path.join(config["SAVE_PATH"], env_name)
         os.makedirs(save_dir, exist_ok=True)
@@ -845,41 +856,93 @@ def single_run(config):
 
 
 def tune(default_config):
-    """Hyperparameter sweep with wandb."""
+    """Hyperparameter sweep with vmap over seeds and hyperparameters."""
 
-    env, env_name = env_from_config(copy.deepcopy(default_config))
+    import time
+
+    start_time = time.time()
+
+    ## Define the hyperparameters to search
+    hypers_to_search = {
+        "lr": [0.001, 0.005, 0.0005],
+        "ent_coeff": [0.0],
+    }
+    all_hypers = [jnp.array(v) for v in hypers_to_search.values()]
+    # cartesian product of all hyperparameters to create a grid
+    # hypers_grid shape: (num_combinations, num_hyperparams)
+    _grids = jnp.meshgrid(*all_hypers, indexing="ij")
+    hypers_grid = jnp.stack([*_grids], axis=-1).reshape(-1, len(all_hypers))
+    hypers_split = [hypers_grid[:, i] for i in range(hypers_grid.shape[1])]
+
+    ## seeds for each hyperparameter
+    rng = jax.random.PRNGKey(default_config["SEED"])
+    rngs = jax.random.split(rng, default_config["NUM_SEEDS"])
+
+    ## create a vmap over the hyperparameters and seeds
+    #! Manually adjust the inputs in the train function
+    #! and Nones and 0s in the vmaps to match the input shapes
+    vmap_seeds = jax.vmap(make_train(default_config), in_axes=(None, None, 0))
+    vmap_hypers = jax.vmap(vmap_seeds, in_axes=(0, 0, None))
+    train_vjit = jax.jit(vmap_hypers)
+    # outs shape: (num_combinations, num_seeds, num_updates)
+    outs = jax.block_until_ready(train_vjit(*hypers_split, rngs))
+
+    test_returns = outs["runner_state"][-1] / 1e6
+    num_combinations, num_seeds, num_updates = test_returns.shape
+
+    # Aggregate over seeds
+    # shape: (num_combinations, num_updates)
+    test_returns_mean = jnp.mean(test_returns, axis=1)
+    test_returns_std = jnp.std(test_returns, axis=1)
+
+    # get the best hyperparameter(s)
+    test_returns_max = jnp.max(test_returns_mean, axis=1)
+    idx_best_comb = jnp.argmax(test_returns_max)
+    best_hyper = hypers_grid[idx_best_comb]
+
+    # print results
+    print("-" * 50)
+    print(f"Best combination: {best_hyper}, index: {idx_best_comb}")
+    print(f"Best combination mean: {test_returns_mean[idx_best_comb].mean():.2f}")
+    print(f"Best combination std: {test_returns_std[idx_best_comb].mean():.2f}")
+
+    print()
+    print("Summary of all combinations:")
+    print("-" * 25)
+    print(f"# combinations: {num_combinations}")
+    print(f"# seeds (per combination): {num_seeds}")
+    print("Hyperparameters grid:")
+    for i, hyp in enumerate(hypers_grid):
+        _label = [f"{k}: {v}" for k, v in zip(hypers_to_search.keys(), hyp)]
+        print(
+            f"{i}: {_label} | mean: {test_returns_mean[i].mean():.2f}, std: {test_returns_std[i].mean():.2f}"
+        )
+
+    # plot
+    import matplotlib.pyplot as plt
+
+    env_name = default_config["ENV_NAME"]
     alg_name = default_config["ALG_NAME"]
 
-    def wrapped_make_train():
-        wandb.init(project=default_config["PROJECT"])
+    for h, hyp in enumerate(hypers_grid):
+        _label = [f"{k}: {v}" for k, v in zip(hypers_to_search.keys(), hyp)]
+        plt.plot(test_returns_mean[h], label=_label)
+        plt.fill_between(
+            np.arange(num_updates),
+            test_returns_mean[h] - test_returns_std[h],
+            test_returns_mean[h] + test_returns_std[h],
+            alpha=0.2,
+        )
+    plt.title(f"Hyperparameter Search | ENV: {env_name}, ALG:{alg_name}")
+    plt.xlabel("Eval Chckpts")
+    plt.ylabel("Returns")
+    plt.legend()
+    plt.savefig("hypers.png", dpi=300)
+    plt.show()
 
-        # update the default params
-        config = copy.deepcopy(default_config)
-        for k, v in dict(wandb.config).items():
-            config[k] = v
+    total_time = time.time() - start_time
 
-        rng = jax.random.PRNGKey(config["SEED"])
-        rngs = jax.random.split(rng, config["NUM_SEEDS"])
-        train_vjit = jax.jit(jax.vmap(make_train(config, env)))
-        outs = jax.block_until_ready(train_vjit(rngs))
-
-    sweep_config = {
-        "name": f"{alg_name}_{env_name}",
-        "method": "bayes",
-        "metric": {
-            "name": "test_returned_episode_returns",
-            "goal": "maximize",
-        },
-        "parameters": {
-            "LR": {"values": [0.001, 0.005]},
-        },
-    }
-
-    wandb.login()
-    sweep_id = wandb.sweep(
-        sweep_config, entity=default_config["ENTITY"], project=default_config["PROJECT"]
-    )
-    wandb.agent(sweep_id, wrapped_make_train, count=300)
+    print(f"Total time:{total_time:.2f}")
 
 
 @hydra.main(version_base=None, config_path="config", config_name="mappo_rnn_road_env")

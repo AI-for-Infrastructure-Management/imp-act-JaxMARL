@@ -46,12 +46,19 @@ obs, env_state = ctrm_env.batch_reset(key_reset)
 runner = Runner(key=key, env_state=env_state, obs=obs)
 
 
-def policy(obs, key):
+def policy(env_state, key):
     # do-nothing
-    actions = {
-        agent: jnp.zeros(NUM_ENVS, dtype=jnp.int32)
-        for a, agent in enumerate(env.agents)
-    }
+    # actions = {
+    #     agent: jnp.zeros(NUM_ENVS, dtype=jnp.int32)
+    #     for a, agent in enumerate(env.agents)
+    # }
+
+    # humble heuristic
+    # best minor repair threshold: 2
+    timepstep = env_state.timestep.flatten()
+    observations = env_state.observation.flatten().reshape(NUM_ENVS, -1)
+    actions_array = jnp.where(observations > 1, 2, 0)
+    actions = {agent: actions_array[:, a] for a, agent in enumerate(env.agents)}
 
     # random actions
     # actions = {}
@@ -70,7 +77,7 @@ def env_step(runner, unused):
 
     # choose actions
     # actions (dict): For each agent, an array of size NUM_ENVS
-    actions = policy(obs, key_action)
+    actions = policy(env_state.env_state, key_action)
 
     next_obs, env_state, reward, done, infos = ctrm_env.batch_step(
         key_step, env_state, actions
@@ -92,6 +99,7 @@ metrics = jax.tree.map(
 )
 
 # (numpy, do-nothing) ToyExample-v2: -1_080.811
+# (numpy, humble heuristic) ToyExample-v2: ~300
 # (numpy, do-nothing) Cologne-v1: -19_984.037
 mean_return = metrics["returned_episode_returns"] / reward_normalization
 print(f"Map: {MAP_NAME} | Mean return: {mean_return:.2f}")
