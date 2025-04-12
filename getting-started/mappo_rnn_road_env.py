@@ -791,10 +791,14 @@ def make_train(config):
 
 def single_run(config):
 
+    num_seeds = config["NUM_SEEDS"]
+    alg_name = config["ALG_NAME"]
+    map_name = config["ENV_KWARGS"]["map_name"]
+
     wandb.init(
         entity=config["ENTITY"],
         project=config["PROJECT"],
-        tags=["MAPPO", "RNN"],
+        tags=["MAPPO", "RNN", map_name],
         config=config,
         mode=config["WANDB_MODE"],
     )
@@ -819,10 +823,6 @@ def single_run(config):
         print(f"Seed {i}: {test_returns_max[i]:.2f}")
 
     ## Plotting
-    num_seeds = config["NUM_SEEDS"]
-    alg_name = config["ALG_NAME"]
-    map_name = config["ENV_KWARGS"]["map_name"]
-
     import matplotlib.pyplot as plt
 
     plt.plot(test_returns_mean)
@@ -835,7 +835,7 @@ def single_run(config):
     plt.xlabel("Eval Chckpts")
     plt.ylabel("Returns")
     plt.title(f"Runs ({num_seeds}) | {alg_name} on {map_name}")
-    plt.savefig("results/mappo_rnn_road_env.png", dpi=300)
+    plt.savefig("mappo_rnn_road_env.png", dpi=300)
     plt.show()
 
     # save model params
