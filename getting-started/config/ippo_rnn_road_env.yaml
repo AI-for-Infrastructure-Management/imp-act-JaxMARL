@@ -1,29 +1,49 @@
-"LR": 0.004
+"TOTAL_TIMESTEPS": 10e6
 "NUM_ENVS": 128
-"NUM_STEPS": 128
-"GRU_HIDDEN_DIM": 128
-"FC_DIM_SIZE": 128
-"TOTAL_TIMESTEPS": 1e7
+"LR": 0.001
 "UPDATE_EPOCHS": 4
 "NUM_MINIBATCHES": 4
-"GAMMA": 0.99
+
+REWARD_STANDARDIZATION: True
+"MAX_GRAD_NORM": 0.25
+"ENT_COEF": 0.0
+"NUM_STEPS": 128
 "GAE_LAMBDA": 0.95
 "CLIP_EPS": 0.05
-"SCALE_CLIP_EPS": False
-"ENT_COEF": 0.01
+"ACTIVATION": "relu" # hardcoded in the script
 "VF_COEF": 0.5
-"MAX_GRAD_NORM": 0.25
-"ACTIVATION": "relu"
-"ENV_NAME": "HeuristicEnemySMAX"
-"MAP_NAME": "2s3z"
-"SEED": 0
-"ENV_KWARGS": 
-  "see_enemy_actions": True
-  "walls_cause_death": True
-  "attack_mode": "closest"
+
+"GRU_HIDDEN_DIM": 128
+"FC_DIM_SIZE": 128
+"GAMMA": 0.99
 "ANNEAL_LR": True
+"SCALE_CLIP_EPS": False
+
+# ENV
+"ENV_NAME": "road_env"
+"ENV_KWARGS": {"map_name": "ToyExample-v2"}
+
+# EVALUATION
+"TEST_DURING_TRAINING": True
+"TEST_INTERVAL": 0.1 # as a fraction of updates
+"TEST_NUM_STEPS": 50
+"TEST_NUM_ENVS": 1_000
+
+"ALG_NAME": "ippo_rnn"
+
+############ global params ############
+
+# experiment params
+"NUM_SEEDS": 1 # number of vmapped seeds
+"SEED": 0
+
+"HYP_TUNE": False # perform hyp tune
 
 # WandB Params
-"ENTITY": ""
-"PROJECT": ""
-"WANDB_MODE" : "disabled"
+"WANDB_MODE": "disabled"
+"ENTITY": "shaktimaan"
+"PROJECT": "impact-JaxMARL"
+"WANDB_LOG_ALL_SEEDS": False # will log vmapped seeds separately
+
+# where to save the params (if None, will not save)
+# "SAVE_PATH": null

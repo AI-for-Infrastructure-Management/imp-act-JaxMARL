@@ -1,21 +1,26 @@
 """
 Based on PureJaxRL Implementation of PPO
+
+Adapted from: baselines/IPPO/ippo_rnn_smax.py
 """
 
+import os
+import copy
+import chex
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
 import numpy as np
 import optax
 from flax.linen.initializers import constant, orthogonal
-from typing import Sequence, NamedTuple, Any, Dict
+from typing import Sequence, NamedTuple, Dict
 from flax.training.train_state import TrainState
 import distrax
 import hydra
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
-from jaxmarl.wrappers.baselines import SMAXLogWrapper
-from jaxmarl.environments.smax import map_name_to_scenario, HeuristicEnemySMAX
+import jaxmarl
+from jaxmarl.wrappers.baselines import LogWrapper, JaxMARLWrapper
 
 import wandb
 import functools
@@ -35,12 +40,24 @@ class ScannedRNN(nn.Module):
         """Applies the module."""
         rnn_state = carry
         ins, resets = x
+
+        # ToDO: Remove after fixing env
+        # Ensure inputs are cast to float32
+        ins = ins.astype(jnp.float32)
+        resets = resets.astype(jnp.float32)
+
         rnn_state = jnp.where(
             resets[:, np.newaxis],
             self.initialize_carry(*rnn_state.shape),
             rnn_state,
         )
         new_rnn_state, y = nn.GRUCell(features=ins.shape[1])(rnn_state, ins)
+
+        # ToDO: Remove after fixing env
+        # Ensure inputs are cast to float32
+        new_rnn_state = new_rnn_state.astype(jnp.float32)
+        y = y.astype(jnp.float32)
+
         return new_rnn_state, y
 
     @staticmethod
@@ -56,30 +73,34 @@ class ActorCriticRNN(nn.Module):
 
     @nn.compact
     def __call__(self, hidden, x):
-        obs, dones, avail_actions = x
+        obs, dones = x
         embedding = nn.Dense(
-            self.config["FC_DIM_SIZE"], kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+            self.config["FC_DIM_SIZE"],
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
         )(obs)
         embedding = nn.relu(embedding)
 
         rnn_in = (embedding, dones)
         hidden, embedding = ScannedRNN()(hidden, rnn_in)
 
-        actor_mean = nn.Dense(self.config["GRU_HIDDEN_DIM"], kernel_init=orthogonal(2), bias_init=constant(0.0))(
-            embedding
-        )
-        actor_mean = nn.relu(actor_mean)
         actor_mean = nn.Dense(
+            self.config["GRU_HIDDEN_DIM"],
+            kernel_init=orthogonal(2),
+            bias_init=constant(0.0),
+        )(embedding)
+        actor_mean = nn.relu(actor_mean)
+        action_logits = nn.Dense(
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
-        unavail_actions = 1 - avail_actions
-        action_logits = actor_mean - (unavail_actions * 1e10)
 
         pi = distrax.Categorical(logits=action_logits)
 
-        critic = nn.Dense(self.config["FC_DIM_SIZE"], kernel_init=orthogonal(2), bias_init=constant(0.0))(
-            embedding
-        )
+        critic = nn.Dense(
+            self.config["FC_DIM_SIZE"],
+            kernel_init=orthogonal(2),
+            bias_init=constant(0.0),
+        )(embedding)
         critic = nn.relu(critic)
         critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(
             critic
@@ -97,7 +118,6 @@ class Transition(NamedTuple):
     log_prob: jnp.ndarray
     obs: jnp.ndarray
     info: jnp.ndarray
-    avail_actions: jnp.ndarray
 
 
 def batchify(x: dict, agent_list, num_actors):
@@ -110,9 +130,47 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     return {a: x[i] for i, a in enumerate(agent_list)}
 
 
+@chex.dataclass
+class RunningStats:
+    count: jnp.ndarray  # or float32
+    mean: jnp.ndarray
+    var: jnp.ndarray
+
+
+def init_running_stats():
+    return RunningStats(
+        count=jnp.array(0.0, dtype=jnp.float32),
+        mean=jnp.array(0.0, dtype=jnp.float32),
+        var=jnp.array(0.0, dtype=jnp.float32),
+    )
+
+
+def update_running_stats(stats: RunningStats, x: jnp.ndarray) -> RunningStats:
+    x = x.astype(jnp.float32)  # if x might be float64
+    batch_count = x.size
+    batch_mean = jnp.mean(x)
+    batch_var = jnp.var(x)
+
+    delta = batch_mean - stats.mean
+    new_count = stats.count + batch_count
+    new_mean = stats.mean + (delta * batch_count) / new_count
+    m_a = stats.var * stats.count
+    m_b = batch_var * batch_count
+    m_2 = m_a + m_b + (delta**2) * (stats.count * batch_count) / new_count
+    new_var = m_2 / new_count
+
+    return RunningStats(count=new_count, mean=new_mean, var=new_var)
+
+
+def apply_normalization(stats: RunningStats, x):
+    return (x - stats.mean) / jnp.sqrt(stats.var + 1e-8)
+
+
 def make_train(config):
-    scenario = map_name_to_scenario(config["MAP_NAME"])
-    env = HeuristicEnemySMAX(scenario=scenario, **config["ENV_KWARGS"])
+
+    env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
+    env = LogWrapper(env)
+
     config["NUM_ACTORS"] = env.num_agents * config["NUM_ENVS"]
     config["NUM_UPDATES"] = (
         config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
@@ -125,8 +183,6 @@ def make_train(config):
         if config["SCALE_CLIP_EPS"]
         else config["CLIP_EPS"]
     )
-
-    env = SMAXLogWrapper(env)
 
     def linear_schedule(count):
         frac = (
@@ -145,9 +201,10 @@ def make_train(config):
                 (1, config["NUM_ENVS"], env.observation_space(env.agents[0]).shape[0])
             ),
             jnp.zeros((1, config["NUM_ENVS"])),
-            jnp.zeros((1, config["NUM_ENVS"], env.action_space(env.agents[0]).n)),
         )
-        init_hstate = ScannedRNN.initialize_carry(config["NUM_ENVS"], config["GRU_HIDDEN_DIM"])
+        init_hstate = ScannedRNN.initialize_carry(
+            config["NUM_ENVS"], config["GRU_HIDDEN_DIM"]
+        )
         network_params = network.init(_rng, init_hstate, init_x)
         if config["ANNEAL_LR"]:
             tx = optax.chain(
@@ -166,30 +223,34 @@ def make_train(config):
         )
 
         # INIT ENV
+        original_seed = rng[0]
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
         obsv, env_state = jax.vmap(env.reset, in_axes=(0,))(reset_rng)
-        init_hstate = ScannedRNN.initialize_carry(config["NUM_ACTORS"], config["GRU_HIDDEN_DIM"])
+        init_hstate = ScannedRNN.initialize_carry(
+            config["NUM_ACTORS"], config["GRU_HIDDEN_DIM"]
+        )
+
         # TRAIN LOOP
         def _update_step(update_runner_state, unused):
             # COLLECT TRAJECTORIES
-            runner_state, update_steps = update_runner_state
+            runner_state, update_steps, eval_metrics = update_runner_state
 
             def _env_step(runner_state, unused):
-                train_state, env_state, last_obs, last_done, hstate, rng = runner_state
+                (
+                    train_state,
+                    env_state,
+                    last_obs,
+                    last_done,
+                    hstate,
+                    rnorm,
+                    rng,
+                ) = runner_state
 
                 # SELECT ACTION
                 rng, _rng = jax.random.split(rng)
-                avail_actions = jax.vmap(env.get_avail_actions)(env_state.env_state)
-                avail_actions = jax.lax.stop_gradient(
-                    batchify(avail_actions, env.agents, config["NUM_ACTORS"])
-                )
                 obs_batch = batchify(last_obs, env.agents, config["NUM_ACTORS"])
-                ac_in = (
-                    obs_batch[np.newaxis, :],
-                    last_done[np.newaxis, :],
-                    avail_actions,
-                )
+                ac_in = (obs_batch[np.newaxis, :], last_done[np.newaxis, :])
                 hstate, pi, value = network.apply(train_state.params, hstate, ac_in)
                 action = pi.sample(seed=_rng)
                 log_prob = pi.log_prob(action)
@@ -204,6 +265,12 @@ def make_train(config):
                 obsv, env_state, reward, done, info = jax.vmap(
                     env.step, in_axes=(0, 0, 0)
                 )(rng_step, env_state, env_act)
+                rewards_flat = batchify(
+                    reward, env.agents, config["NUM_ACTORS"]
+                ).squeeze()
+                if config["REWARD_STANDARDIZATION"]:
+                    new_rnorm = update_running_stats(rnorm, rewards_flat)
+                    rewards_flat = apply_normalization(new_rnorm, rewards_flat)
                 info = jax.tree.map(lambda x: x.reshape((config["NUM_ACTORS"])), info)
                 done_batch = batchify(done, env.agents, config["NUM_ACTORS"]).squeeze()
                 transition = Transition(
@@ -211,31 +278,40 @@ def make_train(config):
                     last_done,
                     action.squeeze(),
                     value.squeeze(),
-                    batchify(reward, env.agents, config["NUM_ACTORS"]).squeeze(),
+                    rewards_flat,
                     log_prob.squeeze(),
                     obs_batch,
                     info,
-                    avail_actions,
                 )
-                runner_state = (train_state, env_state, obsv, done_batch, hstate, rng)
+                runner_state = (
+                    train_state,
+                    env_state,
+                    obsv,
+                    done_batch,
+                    hstate,
+                    new_rnorm,
+                    rng,
+                )
                 return runner_state, transition
 
-            initial_hstate = runner_state[-2]
+            rnorm = runner_state[-2]
+            initial_hstate = runner_state[-3]
             runner_state, traj_batch = jax.lax.scan(
                 _env_step, runner_state, None, config["NUM_STEPS"]
             )
 
             # CALCULATE ADVANTAGE
-            train_state, env_state, last_obs, last_done, hstate, rng = runner_state
+            (
+                train_state,
+                env_state,
+                last_obs,
+                last_done,
+                hstate,
+                rnorm,
+                rng,
+            ) = runner_state
             last_obs_batch = batchify(last_obs, env.agents, config["NUM_ACTORS"])
-            avail_actions = jnp.ones(
-                (config["NUM_ACTORS"], env.action_space(env.agents[0]).n)
-            )
-            ac_in = (
-                last_obs_batch[np.newaxis, :],
-                last_done[np.newaxis, :],
-                avail_actions,
-            )
+            ac_in = (last_obs_batch[np.newaxis, :], last_done[np.newaxis, :])
             _, _, last_val = network.apply(train_state.params, hstate, ac_in)
             last_val = last_val.squeeze()
 
@@ -275,7 +351,7 @@ def make_train(config):
                         _, pi, value = network.apply(
                             params,
                             init_hstate.squeeze(),
-                            (traj_batch.obs, traj_batch.done, traj_batch.avail_actions),
+                            (traj_batch.obs, traj_batch.done),
                         )
                         log_prob = pi.log_prob(traj_batch.action)
 
@@ -285,9 +361,9 @@ def make_train(config):
                         ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
                         value_losses = jnp.square(value - targets)
                         value_losses_clipped = jnp.square(value_pred_clipped - targets)
-                        value_loss = 0.5 * jnp.maximum(
-                            value_losses, value_losses_clipped
-                        ).mean()
+                        value_loss = (
+                            0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
+                        )
 
                         # CALCULATE ACTOR LOSS
                         logratio = log_prob - traj_batch.log_prob
@@ -315,7 +391,14 @@ def make_train(config):
                             + config["VF_COEF"] * value_loss
                             - config["ENT_COEF"] * entropy
                         )
-                        return total_loss, (value_loss, loss_actor, entropy, ratio, approx_kl, clip_frac)
+                        return total_loss, (
+                            value_loss,
+                            loss_actor,
+                            entropy,
+                            ratio,
+                            approx_kl,
+                            clip_frac,
+                        )
 
                     grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
                     total_loss, grads = grad_fn(
@@ -335,9 +418,7 @@ def make_train(config):
                 rng, _rng = jax.random.split(rng)
 
                 # adding an additional "fake" dimensionality to perform minibatching correctly
-                init_hstate = jnp.reshape(
-                    init_hstate, (1, config["NUM_ACTORS"], -1)
-                )
+                init_hstate = jnp.reshape(init_hstate, (1, config["NUM_ACTORS"], -1))
                 batch = (
                     init_hstate,
                     traj_batch,
@@ -387,17 +468,19 @@ def make_train(config):
             update_state, loss_info = jax.lax.scan(
                 _update_epoch, update_state, None, config["UPDATE_EPOCHS"]
             )
+            ratio_0 = loss_info[1][3].at[0, 0].get().mean()
+            loss_info = jax.tree.map(lambda x: x.mean(), loss_info)
+
+            # UPDATE METRICS
             train_state = update_state[0]
-            metric = traj_batch.info
-            metric = jax.tree.map(
+            metrics = traj_batch.info
+            metrics = jax.tree.map(
                 lambda x: x.reshape(
                     (config["NUM_STEPS"], config["NUM_ENVS"], env.num_agents)
                 ),
                 traj_batch.info,
             )
-            ratio_0 = loss_info[1][3].at[0,0].get().mean()
-            loss_info = jax.tree.map(lambda x: x.mean(), loss_info)
-            metric["loss"] = {
+            metrics["loss"] = {
                 "total_loss": loss_info[0],
                 "value_loss": loss_info[1][0],
                 "actor_loss": loss_info[1][1],
@@ -407,33 +490,134 @@ def make_train(config):
                 "approx_kl": loss_info[1][4],
                 "clip_frac": loss_info[1][5],
             }
-            
+            metrics["rnorm_mean"] = rnorm.mean
+            metrics["rnorm_std"] = jnp.sqrt(rnorm.var)
+            metrics["rnorm_count"] = rnorm.count
             rng = update_state[-1]
 
-            def callback(metric):
-                wandb.log(
-                    {
-                        # the metrics have an agent dimension, but this is identical
-                        # for all agents so index into the 0th item of that dimension.
-                        "returns": metric["returned_episode_returns"][:, :, 0][
-                            metric["returned_episode"][:, :, 0]
-                        ].mean(),
-                        "win_rate": metric["returned_won_episode"][:, :, 0][
-                            metric["returned_episode"][:, :, 0]
-                        ].mean(),
-                        "env_step": metric["update_steps"]
-                        * config["NUM_ENVS"]
-                        * config["NUM_STEPS"],
-                        **metric["loss"],
-                    }
+            # EVALUATION
+            if config.get("TEST_DURING_TRAINING", True):
+                rng, _rng = jax.random.split(rng)
+
+                def eval_and_store_returns(rng, train_state):
+                    val = get_greedy_metrics(rng, train_state)[
+                        "returned_episode_returns"
+                    ]
+                    idx = update_steps // int(
+                        config["NUM_UPDATES"] * config["TEST_INTERVAL"]
+                    )
+                    return eval_metrics.at[idx].set(val), val
+
+                eval_metrics, eval_return = jax.lax.cond(
+                    update_steps % int(config["NUM_UPDATES"] * config["TEST_INTERVAL"])
+                    == 0,
+                    lambda _: eval_and_store_returns(_rng, train_state),
+                    lambda _: (eval_metrics, 0.0),
+                    operand=None,
                 )
+                metrics.update({"test_eval_return": eval_return})
 
-            metric["update_steps"] = update_steps
-            jax.experimental.io_callback(callback, None, metric)
+            metrics["update_steps"] = update_steps
+            # report on wandb if required
+            if config["WANDB_MODE"] != "disabled":
+
+                def callback(metrics, original_seed):
+                    if config.get("WANDB_LOG_ALL_SEEDS", False):
+                        metrics.update(
+                            {
+                                f"rng{int(original_seed)}/{k}": v
+                                for k, v in metrics.items()
+                            }
+                        )
+                    wandb.log(metrics)
+
+                jax.debug.callback(callback, metrics, original_seed)
+
             update_steps = update_steps + 1
-            runner_state = (train_state, env_state, last_obs, last_done, hstate, rng)
-            return (runner_state, update_steps), metric
+            runner_state = (
+                train_state,
+                env_state,
+                last_obs,
+                last_done,
+                hstate,
+                rnorm,
+                rng,
+            )
+            return (runner_state, update_steps, eval_metrics), metrics
 
+        def get_greedy_metrics(rng, train_state):
+            """Help function to test greedy policy during training"""
+            if not config.get("TEST_DURING_TRAINING", True):
+                return None
+
+            config["TEST_NUM_ACTORS"] = config["TEST_NUM_ENVS"] * env.num_agents
+
+            def _greedy_env_step(step_state, unused):
+                train_state, env_state, last_obs, last_done, hstate, rng = step_state
+
+                # SELECT ACTION
+                rng, _rng = jax.random.split(rng)
+                obs_batch = batchify(last_obs, env.agents, config["TEST_NUM_ACTORS"])
+                ac_in = (obs_batch[np.newaxis, :], last_done[np.newaxis, :])
+                hstate, pi, _ = network.apply(train_state.params, hstate, ac_in)
+                action = pi.sample(seed=_rng)
+                env_act = unbatchify(
+                    action, env.agents, config["TEST_NUM_ENVS"], env.num_agents
+                )
+                env_act = {k: v.squeeze() for k, v in env_act.items()}
+
+                # STEP ENV
+                rng, _rng = jax.random.split(rng)
+                rng_step = jax.random.split(_rng, config["TEST_NUM_ENVS"])
+                obsv, env_state, rewards, dones, infos = jax.vmap(
+                    env.step, in_axes=(0, 0, 0)
+                )(rng_step, env_state, env_act)
+                infos = jax.tree.map(
+                    lambda x: x.reshape((config["TEST_NUM_ACTORS"])), infos
+                )
+                done_batch = batchify(
+                    dones, env.agents, config["TEST_NUM_ACTORS"]
+                ).squeeze()
+
+                step_state = (train_state, env_state, obsv, done_batch, hstate, rng)
+                return step_state, (rewards, dones, infos)
+
+            reset_rng = jax.random.split(_rng, config["TEST_NUM_ENVS"])
+            init_obs, env_state = jax.vmap(env.reset, in_axes=(0,))(reset_rng)
+            init_hstate = ScannedRNN.initialize_carry(
+                config["TEST_NUM_ACTORS"], config["GRU_HIDDEN_DIM"]
+            )
+            done_batch = jnp.zeros((config["TEST_NUM_ACTORS"],), dtype=jnp.bool_)
+            step_state = (
+                train_state,
+                env_state,
+                init_obs,
+                done_batch,
+                init_hstate,
+                rng,
+            )
+            step_state, (rewards, dones, infos) = jax.lax.scan(
+                _greedy_env_step, step_state, None, config["TEST_NUM_STEPS"]
+            )
+            metrics = jax.tree.map(
+                lambda x: jnp.nanmean(
+                    jnp.where(
+                        infos["returned_episode"],
+                        x,
+                        jnp.nan,
+                    )
+                ),
+                infos,
+            )
+            return metrics
+
+        rng, _rng = jax.random.split(rng)
+
+        # Storing evaluation metrics on CPU to save GPU memory
+        num_evals = int(1 / config["TEST_INTERVAL"])
+        initial_eval_metrics = jnp.zeros((num_evals,), device="cpu")
+
+        # train
         rng, _rng = jax.random.split(rng)
         runner_state = (
             train_state,
@@ -441,29 +625,148 @@ def make_train(config):
             obsv,
             jnp.zeros((config["NUM_ACTORS"]), dtype=bool),
             init_hstate,
+            init_running_stats(),
             _rng,
         )
-        runner_state, metric = jax.lax.scan(
-            _update_step, (runner_state, 0), None, config["NUM_UPDATES"]
+        runner_state, metrics = jax.lax.scan(
+            _update_step,
+            (runner_state, 0, initial_eval_metrics),
+            None,
+            config["NUM_UPDATES"],
         )
-        return {"runner_state": runner_state}
+        return {"runner_state": runner_state, "metrics": None}
 
     return train
 
 
-@hydra.main(version_base=None, config_path="config", config_name="ippo_rnn_smax")
-def main(config):
-    config = OmegaConf.to_container(config)
+def single_run(config):
+
+    num_seeds = config["NUM_SEEDS"]
+    alg_name = config["ALG_NAME"]
+    map_name = config["ENV_KWARGS"]["map_name"]
+
     wandb.init(
         entity=config["ENTITY"],
         project=config["PROJECT"],
-        tags=["IPPO", "RNN"],
+        tags=["IPPO", "RNN", map_name],
         config=config,
         mode=config["WANDB_MODE"],
     )
+
     rng = jax.random.PRNGKey(config["SEED"])
-    train_jit = jax.jit(make_train(config), device=jax.devices()[0])
-    out = train_jit(rng)
+    rngs = jax.random.split(rng, config["NUM_SEEDS"])
+    train_vjit = jax.jit(jax.vmap(make_train(config)))
+    outs = jax.block_until_ready(train_vjit(rngs))
+
+    # shape: (num_seeds, num_evals)
+    test_returns = outs["runner_state"][-1] / 1e6
+    num_seeds, num_evals = test_returns.shape
+
+    # Aggregate test returns
+    test_returns_mean = jnp.mean(test_returns, axis=0)
+    test_returns_std = jnp.std(test_returns, axis=0)
+    test_returns_max = jnp.max(test_returns, axis=1)
+
+    ## Printing results
+    print(f"Max returns (over all seeds): {max(test_returns_max):.2f}")
+    for i in range(num_seeds):
+        print(f"Seed {i}: {test_returns_max[i]:.2f}")
+
+    ## Plotting
+    import matplotlib.pyplot as plt
+
+    plt.plot(test_returns_mean)
+    plt.fill_between(
+        np.arange(num_evals),
+        test_returns_mean - test_returns_std,
+        test_returns_mean + test_returns_std,
+        alpha=0.2,
+    )
+    plt.xlabel("Eval Chckpts")
+    plt.ylabel("Returns")
+    plt.title(f"Runs ({num_seeds}) | {alg_name} on {map_name}")
+    plt.savefig("ippo_rnn_road_env.png", dpi=300)
+    plt.show()
+
+    # save model params
+    if config.get("SAVE_PATH", None) is not None:
+        from jaxmarl.wrappers.baselines import save_params
+
+        env_name = config["ENV_NAME"]
+        alg_name = config["ALG_NAME"]
+        model_state = outs["runner_state"][0]
+        save_dir = os.path.join(config["SAVE_PATH"], env_name)
+        os.makedirs(save_dir, exist_ok=True)
+        OmegaConf.save(
+            config,
+            os.path.join(
+                save_dir, f'{alg_name}_{env_name}_seed{config["SEED"]}_config.yaml'
+            ),
+        )
+
+        for i, rng in enumerate(rngs):
+            params = jax.tree.map(lambda x: x[i], model_state.params)
+            save_path = os.path.join(
+                save_dir,
+                f'{alg_name}_{env_name}_seed{config["SEED"]}_vmap{i}.safetensors',
+            )
+            save_params(params, save_path)
+
+
+def tune(default_config):
+    """Hyperparameter sweep with wandb."""
+
+    alg_name = default_config["ALG_NAME"]
+    map_name = default_config["ENV_KWARGS"]["map_name"]
+
+    def wrapped_make_train():
+        run = wandb.init(project=default_config["PROJECT"], tags=[alg_name, map_name])
+
+        # update the default params
+        config = copy.deepcopy(default_config)
+        for k, v in dict(wandb.config).items():
+            config[k] = v
+
+        config["FC_DIM_SIZE"] = config["GRU_HIDDEN_DIM"]
+
+        rng = jax.random.PRNGKey(config["SEED"])
+        rngs = jax.random.split(rng, config["NUM_SEEDS"])
+        train_vjit = jax.jit(jax.vmap(make_train(config)))
+        outs = jax.block_until_ready(train_vjit(rngs))
+
+    sweep_config = {
+        "name": f"{alg_name}_{map_name}",
+        "method": "grid",
+        "metric": {
+            "name": "test_eval_return",
+            "goal": "maximize",
+        },
+        "parameters": {
+            "LR": {"values": [0.001, 0.0005]},
+            # "NUM_ENVS": {"values": [8, 32, 64, 128]},
+            # "ENT_COEF": {"values": [0, 0.01]},
+            # FC_DIM_SIZE is set to GRU_HIDDEN_DIM in above
+            # "GRU_HIDDEN_DIM": {"values": [32, 64, 128]},
+            # "NUM_MINIBATCHES": {"values": [2, 4, 8]},
+            # "UPDATE_EPOCHS": {"values": [2, 4, 6]},
+        },
+    }
+
+    wandb.login()
+    sweep_id = wandb.sweep(
+        sweep_config, entity=default_config["ENTITY"], project=default_config["PROJECT"]
+    )
+    wandb.agent(sweep_id, wrapped_make_train, count=50)
+
+
+@hydra.main(version_base=None, config_path="config", config_name="ippo_rnn_road_env")
+def main(config):
+    config = OmegaConf.to_container(config)
+    print("Config:\n", OmegaConf.to_yaml(config))
+    if config["HYP_TUNE"]:
+        tune(config)
+    else:
+        single_run(config)
 
 
 if __name__ == "__main__":
