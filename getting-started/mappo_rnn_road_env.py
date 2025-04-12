@@ -69,6 +69,7 @@ class ScannedRNN(nn.Module):
         rnn_state = carry
         ins, resets = x
 
+        # ToDO: Remove after fixing env
         # Ensure inputs are cast to float32
         ins = ins.astype(jnp.float32)
         resets = resets.astype(jnp.float32)
@@ -81,6 +82,7 @@ class ScannedRNN(nn.Module):
 
         new_rnn_state, y = nn.GRUCell(features=ins.shape[1])(rnn_state, ins)
 
+        # ToDO: Remove after fixing env
         # Ensure outputs are cast to float32
         new_rnn_state = new_rnn_state.astype(jnp.float32)
         y = y.astype(jnp.float32)
@@ -169,7 +171,6 @@ class Transition(NamedTuple):
 
 def batchify(x: dict, agent_list, num_actors):
     x = jnp.stack([x[a] for a in agent_list])
-    # print('batchify', x.shape)
     return x.reshape((num_actors, -1))
 
 
@@ -335,11 +336,7 @@ def make_train(config):
                 # SELECT ACTION
                 rng, _rng = jax.random.split(rng)
                 obs_batch = batchify(last_obs, env.agents, config["NUM_ACTORS"])
-                ac_in = (
-                    obs_batch[np.newaxis, :],
-                    last_done[np.newaxis, :],
-                )
-                # print('env step ac in', ac_in)
+                ac_in = (obs_batch[np.newaxis, :], last_done[np.newaxis, :])
                 ac_hstate, pi = actor_network.apply(
                     train_states[0].params, hstates[0], ac_in
                 )
@@ -802,8 +799,8 @@ def single_run(config):
         config=config,
         mode=config["WANDB_MODE"],
     )
-    rng = jax.random.PRNGKey(config["SEED"])
 
+    rng = jax.random.PRNGKey(config["SEED"])
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
     train_vjit = jax.jit(jax.vmap(make_train(config)))
     outs = jax.block_until_ready(train_vjit(rngs))
