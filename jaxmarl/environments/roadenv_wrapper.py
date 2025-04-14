@@ -47,6 +47,8 @@ class RoadEnvironment_Wrapper(object):
             )
         elif encoding_type == "binary":
             self.agent_encodings = self.generate_binary_agent_ids(self.num_agents)
+        elif encoding_type == "one-hot":
+            self.agent_encodings = jnp.eye(self.num_agents, dtype=jnp.float32)
         else:
             raise ValueError(f"Unsupported encoding_type: {encoding_type}")
         agent_encoding_dim = self.agent_encodings.shape[1]
@@ -137,7 +139,6 @@ class RoadEnvironment_Wrapper(object):
         N = self.env.total_num_segments
         _timestep = jnp.full((N, 1), state.timestep / self.env.max_timesteps)
         _budget = jnp.full((N, 1), state.budget_remaining / self.env.budget_amount)
-        # _id = jnp.eye(N, dtype=jnp.float32)
         return jnp.concatenate([state.belief, _timestep, _budget, self.agent_encodings], axis=1)
 
     def get_global_state(self, obs, state: State) -> Dict[str, chex.Array]:
