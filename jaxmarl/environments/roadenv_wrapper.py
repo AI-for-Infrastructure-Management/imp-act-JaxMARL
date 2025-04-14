@@ -132,8 +132,8 @@ class RoadEnvironment_Wrapper(object):
         return jnp.concatenate([state.belief, _timestep, _budget, _id], axis=1)
 
     def get_global_state(self, obs, state: State) -> Dict[str, chex.Array]:
-        _timestep = jnp.array([state.timestep / self.env.max_timesteps])
-        _budget = jnp.array([state.budget_remaining / self.env.budget_amount])
+        _timestep = jnp.array([state.timestep / self.env.max_timesteps], dtype=jnp.float32)
+        _budget = jnp.array([state.budget_remaining / self.env.budget_amount], dtype=jnp.float32)
         return jnp.concatenate([state.belief.flatten(), _timestep, _budget], axis=0)
 
     def observation_space(self, agent=None):

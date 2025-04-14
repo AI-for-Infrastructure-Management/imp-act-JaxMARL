@@ -391,7 +391,7 @@ class CTRolloutManager(JaxMARLWrapper):
             self.get_valid_actions = lambda state: jax.vmap(env.get_legal_moves)(state)
         elif "road_env" in env.name.lower():
             self.global_reward = lambda rewards: rewards["agent_0"]
-            self.global_state = lambda obs, state: self._env.get_global_state(obs, state)
+            self.global_state = lambda obs, state: self._env.get_global_state(obs, state.env_state)
 
     @partial(jax.jit, static_argnums=0)
     def batch_reset(self, key):
@@ -415,6 +415,7 @@ class CTRolloutManager(JaxMARLWrapper):
         else:
             obs = obs_
         obs["__all__"] = self.global_state(obs_, state)
+        # jax.debug.breakpoint()
         return obs, state
 
     @partial(jax.jit, static_argnums=0)
