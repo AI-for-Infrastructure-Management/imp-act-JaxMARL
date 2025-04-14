@@ -1,0 +1,58 @@
+"NUM_ENVS": 16
+"N_MINI_UPDATES": 4
+"NUM_STEPS": 51
+"BUFFER_SIZE": 2000
+"BUFFER_BATCH_SIZE": 32
+"TOTAL_TIMESTEPS": 1e6
+"AGENT_INIT_SCALE": 1.
+"AGENT_HIDDEN_DIM": 32
+"AGENT_TRANSF_NUM_LAYERS": 2
+"AGENT_TRANSF_NUM_HEADS": 8
+"AGENT_TRANSF_DIM_FF": 128
+"MIXER_INIT_SCALE": 1.
+"MIXER_TRANSF_NUM_LAYERS": 2
+"MIXER_TRANSF_NUM_HEADS": 8
+"MIXER_TRANSF_DIM_FF": 128
+"USE_FAST_ATTENTION": True # assumes you have a fast_attention.py file accesible by the training script
+"SCALE_INPUTS": True # applies batch normalization to the obs vectors
+"EMBEDDER_USE_RELU": True # applies relu on the embeddings
+"EPSILON_START": 1.0
+"EPSILON_FINISH": 0.00
+"EPSILON_ANNEAL_TIME": 100000
+"MAX_GRAD_NORM": 1.
+"TARGET_UPDATE_INTERVAL": 10
+"LR": 0.005
+"LR_DECAY_TYPE": 'None' # can be exp (exponential), cos (cosine), linear (linear) or None (static)
+"LR_EXP_DECAY_RATE": 0.00002 # applies only to exponential decay
+"LR_WARMUP": 10 # applies only to cosine decay
+"EPS_ADAM": 0.0000000001
+"TD_LAMBDA_LOSS": False
+"TD_LAMBDA": 0.6
+"GAMMA": 0.99
+"VERBOSE": False
+"NUM_TEST_EPISODES": 32
+"TEST_INTERVAL": 100000
+
+
+# ENV
+"ENV_NAME": "road_env"
+"ENV_KWARGS": {"map_name": "ToyExample-v2"}
+"REW_SCALE": 1e-8
+
+
+############ global params ############
+
+# experiment params
+"NUM_SEEDS": 1 # number of vmapped seeds
+"SEED": 42
+
+"HYP_TUNE": False # perform hyp tune
+
+# wandb params
+"ENTITY": "imp-act"
+"PROJECT": "jaxMARL-transfQmix_ToyExample"
+"WANDB_MODE": "online"
+"WANDB_LOG_ALL_SEEDS": False # will log separately the vmapped seeds
+
+# where to save the params (if None, will not save)
+"SAVE_PATH": null

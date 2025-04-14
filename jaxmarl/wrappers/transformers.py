@@ -27,9 +27,46 @@ class TransformersCTRolloutManager(CTRolloutManager):
                 self._env.get_obs = self.spread_wrapped_get_obs
             self.global_state = lambda obs, state: obs['world_state']
         
+        elif 'road_env' in env.name.lower():
+            super().__init__(env, batch_size, training_agents=None, preprocess_obs=False)
+            if any(issubclass(parent, JaxMARLWrapper) for parent in type(env).__mro__):
+                self._env._env.get_obs = self.road_env_get_obs
+            else:
+                self._env.get_obs = self.road_env_get_obs
+            self.global_state = lambda obs, state: obs['__all__']
+
         else:
-            raise NotImplementedError('This implemention currently supports only MPE_spread and SMAX')
+            raise NotImplementedError(f'The environment {env.name} is not supported for transformers rollout manager.')
         
+
+    @partial(jax.jit, static_argnums=0)
+    def road_env_get_obs(self, state):
+        N = state.belief.shape[0]
+        belief_feat = state.belief
+        timestep_feat = jnp.full((N, 1), state.timestep / self.env.max_timesteps)
+        budget_feat = jnp.full((N, 1), state.budget_remaining / self.env.budget_amount)
+
+        global_state = jnp.concatenate((
+            belief_feat,
+            timestep_feat,
+            budget_feat,
+        ), axis=1).astype(jnp.float32)
+
+        is_self_feat = jnp.eye(N, dtype=jnp.float32)
+
+        obs = {
+            a:jnp.concatenate((
+                global_state,
+                is_self_feat[i][:, None],
+            ), axis=1)
+            for i, a in enumerate(self._env.agents)
+        }
+
+        obs['__all__'] = global_state
+
+        return obs
+
+
 
     @partial(jax.jit, static_argnums=0)
     def smax_obs_vec_to_matrix(self, obs, extra_feats):
