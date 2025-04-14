@@ -27,7 +27,7 @@ class State:
 class RoadEnvironment_Wrapper(object):
     """Jittable abstract base class for all jaxmarl Environments."""
 
-    def __init__(self, map_name) -> None:
+    def __init__(self, map_name, encoding_type="binary") -> None:
         """
         num_agents (int): maximum number of agents within the environment, used to set array dimensions
         """
@@ -38,12 +38,21 @@ class RoadEnvironment_Wrapper(object):
         num_damage_states = self.env.num_damage_states
         num_component_actions = len(self.env.action_map)
         self.world_state_size = self.num_agents * num_damage_states + 2
-        self.observation_spaces = {
-            agent: Box(low=0, high=1, shape=(num_damage_states + 2 + self.num_agents,))
-            for agent in self.agents
-        }
         self.action_spaces = {
             agent: Discrete(num_component_actions) for agent in self.agents
+        }
+        if encoding_type == "sinusoidal":
+            self.agent_encodings = self.sinusoidal_encoding(
+                jnp.arange(self.num_agents), 16
+            )
+        elif encoding_type == "binary":
+            self.agent_encodings = self.generate_binary_agent_ids(self.num_agents)
+        else:
+            raise ValueError(f"Unsupported encoding_type: {encoding_type}")
+        agent_encoding_dim = self.agent_encodings.shape[1]
+        self.observation_spaces = {
+            agent: Box(low=0, high=1, shape=(num_damage_states + 2 + agent_encoding_dim,))
+            for agent in self.agents
         }
 
     @partial(jax.jit, static_argnums=(0,))
@@ -128,8 +137,8 @@ class RoadEnvironment_Wrapper(object):
         N = self.env.total_num_segments
         _timestep = jnp.full((N, 1), state.timestep / self.env.max_timesteps)
         _budget = jnp.full((N, 1), state.budget_remaining / self.env.budget_amount)
-        _id = jnp.eye(N, dtype=jnp.float32)
-        return jnp.concatenate([state.belief, _timestep, _budget, _id], axis=1)
+        # _id = jnp.eye(N, dtype=jnp.float32)
+        return jnp.concatenate([state.belief, _timestep, _budget, self.agent_encodings], axis=1)
 
     def get_global_state(self, obs, state: State) -> Dict[str, chex.Array]:
         _timestep = jnp.array([state.timestep / self.env.max_timesteps], dtype=jnp.float32)
@@ -200,6 +209,31 @@ class RoadEnvironment_Wrapper(object):
 
         return env_state
 
+    @staticmethod
+    def sinusoidal_encoding(position, d_model):
+        """
+        position: int or [N] array of positions (e.g. agent ids or time steps)
+        d_model: dimension of the embedding
+        """
+        position = jnp.atleast_1d(position).astype(jnp.float32)  # shape: [N]
+        i = jnp.arange(d_model)[None, :]  # shape: [1, d_model]
+
+        angle_rates = 1 / jnp.power(10000, (2 * (i // 2)) / d_model)
+        angle_rads = position[:, None] * angle_rates  # shape: [N, d_model]
+
+        # Apply sin to even indices and cos to odd indices
+        angle_rads = jnp.where(i % 2 == 0, jnp.sin(angle_rads), jnp.cos(angle_rads))
+        return angle_rads  # shape: [N, d_model]
+    
+    @staticmethod
+    def generate_binary_agent_ids(num_agents):
+        num_bits = int(jnp.ceil(jnp.log2(num_agents)))
+        ids = jnp.arange(num_agents)
+        # Create mask for each bit (from highest to lowest)
+        bit_masks = 1 << jnp.arange(num_bits - 1, -1, -1)
+        binary_ids = ((ids[:, None] & bit_masks) > 0).astype(jnp.int32)
+        return binary_ids
+    
     @property
     def name(self) -> str:
         """Environment name."""
