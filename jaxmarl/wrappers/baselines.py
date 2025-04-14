@@ -415,7 +415,6 @@ class CTRolloutManager(JaxMARLWrapper):
         else:
             obs = obs_
         obs["__all__"] = self.global_state(obs_, state)
-        # jax.debug.breakpoint()
         return obs, state
 
     @partial(jax.jit, static_argnums=0)
