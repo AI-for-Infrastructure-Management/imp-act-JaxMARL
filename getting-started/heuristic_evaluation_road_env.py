@@ -14,7 +14,15 @@ if DEBUG:
 
 def policy_do_nothing(key, state, obs):
     """Policy that does nothing."""
-    return {agent: 2 for agent in obs.keys()}
+    return {agent: 0 for agent in obs.keys()}
+
+def policy_random(key, state, obs):
+    """Policy that picks a random action (0, 1, or 2) for each agent."""
+    num_agents = len(obs)
+    num_actions = 3  # Update this if you have more or fewer discrete actions
+    keys = jax.random.split(key, num_agents)
+    actions = jax.vmap(lambda k: jax.random.randint(k, (), 0, num_actions))(keys)
+    return {f"agent_{i}": actions[i] for i in range(num_agents)}
 
 def policy_humble_heuristic(key, state, obs):
     """Policy that inspects every n timesteps and takes action 2 if the observation is > 1"""
@@ -23,7 +31,7 @@ def policy_humble_heuristic(key, state, obs):
     # Step 1: Initialize with default action 0
     actions = jnp.zeros_like(obs_insp, dtype=jnp.int32)
     # Step 2: Apply condition for timestep % 46 == 0 → action 1
-    actions = jnp.where(tstep % 5 == 0, 1, actions)
+    actions = jnp.where(tstep % 6 == 0, 1, actions)
     # Step 3: Apply condition for obs > 1 → action 2 (takes priority)
     actions = jnp.where(obs_insp > 1, 2, actions)
     actions_dict = {f"agent_{i}": actions[i] for i in range(len(obs))}
@@ -58,7 +66,7 @@ def run_rollout(key, env, policy, num_steps):
 def main(plot_hist=True):
 
     #### Inputs
-    MAP_NAME = "CologneBonnDusseldorf-v1" # "ToyExample-v2" "Cologne-v1" "CologneBonnDusseldorf-v1"
+    MAP_NAME = "ToyExample-v2" # "ToyExample-v2" "Cologne-v1" "CologneBonnDusseldorf-v1"
     policy = policy_do_nothing
 
     NUM_EPISODES = 1_000

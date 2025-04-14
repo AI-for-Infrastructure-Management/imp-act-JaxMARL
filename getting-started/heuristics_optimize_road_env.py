@@ -3,6 +3,8 @@ import jax.numpy as jnp
 from jaxmarl import make
 from jaxmarl.wrappers.baselines import LogWrapper
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+import time
 
 DEBUG = False
 if DEBUG:
@@ -89,11 +91,11 @@ def run_rollout(key, env, policy, num_steps):
 def main(plot_hist=True):
 
     # Inputs
-    MAP_NAME = "ToyExample-v2" # ToyExample-v2 Cologne-v1
+    MAP_NAME = "ToyExample-v2" # "ToyExample-v2" "Cologne-v1" "CologneBonnDusseldorf-v1"
     NUM_EPISODES = 1000      # episodes per (interval, threshold) pair
     NUM_STEPS = 50
     NORM_CONSTANT = 1e6
-
+    CHUNK_SIZE = 5
     # Let’s say we want intervals [1..50], thresholds [1..5].
     intervals = jnp.arange(1, 51)
     thresholds = jnp.arange(1, 6)
@@ -134,19 +136,31 @@ def main(plot_hist=True):
             return run_rollout_with_params(k, env, interval, threshold, NUM_STEPS)
         
         return jax.vmap(rollout_one_episode)(keys_for_episodes)
-    
-    # Now we vmap over combos
-    run_all = jax.jit(
-        jax.vmap(
-            run_episodes_for_combo,
-            in_axes=(0, 0),    # combo, keys
-        )
-    )
 
+    run_chunk = jax.jit(
+                jax.vmap(
+                    run_episodes_for_combo,
+                    in_axes=(0, 0),
+                )
+    )   
     # shape of results: (num_combos, NUM_EPISODES, 3)
     # because each single rollout returns (total_reward, done_any, log_wrapper_return)
-    results = run_all(combos, all_keys)
-    # results is (rewards, dones, log_returns), each shape (num_combos, num_episodes)
+    start_time = time.time()
+    results_list = []
+    num_chunks = (num_combos + CHUNK_SIZE - 1) // CHUNK_SIZE
+    for i in tqdm(range(num_chunks), desc="Running chunked vmap over combos"):
+        start = i * CHUNK_SIZE
+        end = min((i + 1) * CHUNK_SIZE, num_combos)
+        combos_chunk = combos[start:end]
+        keys_chunk = all_keys[start:end]
+        # This is the original run_all logic but scoped to the chunk
+        results_chunk = run_chunk(combos_chunk, keys_chunk)
+        results_list.append(results_chunk)
+
+    # Stack results from each chunk into a single array
+    results = tuple(jnp.concatenate(r, axis=0) for r in zip(*results_list))
+    end_time = time.time()
+    print(f"\n Evaluation completed in {end_time - start_time:.2f} seconds.")
 
     rewards, dones, logs = results  # unpack the tuple
 
@@ -172,7 +186,8 @@ def main(plot_hist=True):
     best_reward = mean_rewards[best_idx]
 
     print(f"Best combo is (interval={best_interval}, threshold={best_threshold}) "
-          f"with mean reward = {best_reward / NORM_CONSTANT:.6f}")
+          f"with mean reward = {best_reward / NORM_CONSTANT:.6f}"
+          f" and std = {std_rewards[best_idx] / NORM_CONSTANT:.6f}")
 
     # Optionally print out the top few combos
     # This is a bit more advanced, sorting or partial sorting the combos by mean reward
