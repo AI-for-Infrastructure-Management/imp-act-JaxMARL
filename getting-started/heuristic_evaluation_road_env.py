@@ -1,6 +1,7 @@
 import time
 import jax
 import jax.numpy as jnp
+import logging
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -9,6 +10,9 @@ from jaxmarl import make
 from jaxmarl.wrappers.baselines import (
     LogWrapper,
 )
+
+# Get Hydra's logger
+log = logging.getLogger(__name__)
 
 DEBUG = False
 if DEBUG:
@@ -94,10 +98,12 @@ def run_rollout(key, env, policy, num_steps):
 
 @hydra.main(config_path="config/heuristics", config_name="toy_example_do_nothing", version_base=None)
 def main(cfg: DictConfig):
-    print("Config:\n", OmegaConf.to_yaml(OmegaConf.to_container(cfg)))
+    # Log the configuration
+    print(f"Configuration:\n{OmegaConf.to_yaml(OmegaConf.to_container(cfg))}")
 
-    if cfg.double_precision_mode:
+    if cfg.get("double_precision_mode", False):
         jax.config.update("jax_enable_x64", True)
+        log.info("Using double precision mode")
 
     #### Inputs
     MAP_NAME = cfg.map
@@ -140,28 +146,28 @@ def main(cfg: DictConfig):
     end = time.perf_counter()
     # === TIMING END ===
 
-    print(f"{'='*35} RESULTS {'='*35}")
+    log.info(f"{'='*35} RESULTS {'='*35}")
 
-    print(f"Total rollout time: {end - start:.4f} seconds")
+    log.info(f"Total rollout time: {end - start:.4f} seconds")
 
     mean_reward = jax.numpy.mean(results)
     log_wrapper_mean_reward = jnp.mean(log_wrapper_return)
     std_reward = jax.numpy.std(results)
     log_wrapper_std_reward = jnp.std(log_wrapper_return)
 
-    print(f"Total number of runs: {NUM_EPISODES}")
+    log.info(f"Total number of runs: {NUM_EPISODES}")
 
-    print(f"Total reward: {mean_reward / NORM_CONSTANT:.4f}")
-    print(f"Std reward: {std_reward / NORM_CONSTANT:.4f}")
+    log.info(f"Total reward: {mean_reward / NORM_CONSTANT:.6f}")
+    log.info(f"Std reward: {std_reward / NORM_CONSTANT:.6f}")
 
     if not jnp.allclose(mean_reward, log_wrapper_mean_reward):
-        print("Warning: Mean results from the heuristic policy and log wrapper do not match.")
+        log.warning("Warning: Mean results from the heuristic policy and log wrapper do not match.")
 
     if not jnp.allclose(std_reward, log_wrapper_std_reward):
-        print("Warning: Std results from the heuristic policy and log wrapper do not match.")
+        log.warning("Warning: Std results from the heuristic policy and log wrapper do not match.")
     
     if not dones.any():
-        print(f"Warning: No episodes ended in a done state.")
+        log.warning(f"Warning: No episodes ended in a done state.")
 
     if cfg.plot_histogram:
         import matplotlib.pyplot as plt

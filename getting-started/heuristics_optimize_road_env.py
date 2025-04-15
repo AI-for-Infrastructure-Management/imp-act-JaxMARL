@@ -5,6 +5,12 @@ from jaxmarl.wrappers.baselines import LogWrapper
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import time
+import hydra
+import logging
+from omegaconf import DictConfig, OmegaConf
+
+# Get Hydra's logger
+log = logging.getLogger(__name__)
 
 DEBUG = False
 if DEBUG:
@@ -49,7 +55,7 @@ def run_rollout_with_params(key, env, interval, threshold, num_steps):
 
 
 ################################################################################
-# 3) The same rollout function you already have
+# 3) Rollout function
 ################################################################################
 def run_rollout(key, env, policy, num_steps):
     """Run a single rollout in the environment."""
@@ -88,25 +94,36 @@ def run_rollout(key, env, policy, num_steps):
 ################################################################################
 # 4) Main: build the parameter grid, vmap over combos & episodes, compute stats
 ################################################################################
-def main(plot_hist=True):
+@hydra.main(config_path="config/heuristics", config_name="toy_example_humble_heuristic", version_base=None)
+def main(cfg: DictConfig):
+    print(f"Configuration:\n{OmegaConf.to_yaml(OmegaConf.to_container(cfg))}")
 
-    # Inputs
-    MAP_NAME = "ToyExample-v2" # "ToyExample-v2" "Cologne-v1" "CologneBonnDusseldorf-v1"
-    NUM_EPISODES = 1000      # episodes per (interval, threshold) pair
-    NUM_STEPS = 50
-    NORM_CONSTANT = 1e6
-    CHUNK_SIZE = 5
-    # Let’s say we want intervals [1..50], thresholds [1..5].
-    intervals = jnp.arange(1, 51)
-    thresholds = jnp.arange(1, 6)
+    if cfg.get("double_precision_mode", False):
+        jax.config.update("jax_enable_x64", True)
+        log.info("Using double precision mode")
 
-    # We'll build a grid of shape (50, 5, 2),
-    #   then flatten it to (250, 2).
+    # Extract configuration
+    MAP_NAME = cfg.map
+    NUM_EPISODES = cfg.num_episodes
+    NUM_STEPS = cfg.num_steps
+    NORM_CONSTANT = cfg.norm_constant
+    CHUNK_SIZE = cfg.optimization.chunk_size
+    plot_hist = cfg.plot_histogram
+        
+    # Extract optimization parameters
+    intervals = jnp.arange(cfg.optimization.interval_start, cfg.optimization.interval_end)
+    thresholds = jnp.arange(cfg.optimization.threshold_start, cfg.optimization.threshold_end)
+    log.info(f"Intervals range: {cfg.optimization.interval_start} to {cfg.optimization.interval_end-1}")
+    log.info(f"Thresholds range: {cfg.optimization.threshold_start} to {cfg.optimization.threshold_end-1}")
+    log.info(f"Total parameter combinations: {len(intervals) * len(thresholds)}")
+
+    # We'll build a grid of shape (interval_count, threshold_count, 2),
+    #   then flatten it to (interval_count * threshold_count, 2).
     i_grid, t_grid = jnp.meshgrid(intervals, thresholds, indexing="ij")
-    # i_grid.shape = (50, 5), t_grid.shape = (50, 5)
-    combos = jnp.stack([i_grid, t_grid], axis=-1)  # shape = (50, 5, 2)
-    combos = combos.reshape(-1, 2)                 # shape = (250, 2)
-    num_combos = combos.shape[0]  # 250
+    # i_grid.shape = (interval_count, threshold_count), t_grid.shape = (interval_count, threshold_count)
+    combos = jnp.stack([i_grid, t_grid], axis=-1)  
+    combos = combos.reshape(-1, 2)
+    num_combos = combos.shape[0]
 
     # Now we need random keys for each (combo, episode).
     # So in total, we need num_combos * NUM_EPISODES distinct keys.
@@ -119,7 +136,6 @@ def main(plot_hist=True):
     # combo_keys = jnp.repeat(jnp.expand_dims(key, 0), num_combos, axis=0)
     # all_keys = jax.vmap(lambda ck: jax.random.split(ck, NUM_EPISODES))(combo_keys)
 
-    # Make the environment
     env = make('road_env', map_name=MAP_NAME)
     env = LogWrapper(env)
 
@@ -160,7 +176,7 @@ def main(plot_hist=True):
     # Stack results from each chunk into a single array
     results = tuple(jnp.concatenate(r, axis=0) for r in zip(*results_list))
     end_time = time.time()
-    print(f"\n Evaluation completed in {end_time - start_time:.2f} seconds.")
+    log.info(f"Evaluation completed in {end_time - start_time:.2f} seconds")
 
     rewards, dones, logs = results  # unpack the tuple
 
@@ -185,22 +201,27 @@ def main(plot_hist=True):
     best_threshold = combos[best_idx, 1]
     best_reward = mean_rewards[best_idx]
 
-    print(f"Best combo is (interval={best_interval}, threshold={best_threshold}) "
-          f"with mean reward = {best_reward / NORM_CONSTANT:.6f}"
-          f" and std = {std_rewards[best_idx] / NORM_CONSTANT:.6f}")
+    log.info(f"Best combo is (interval={best_interval}, threshold={best_threshold}) "
+             f"with mean reward = {best_reward / NORM_CONSTANT:.6f}"
+             f" and std = {std_rewards[best_idx] / NORM_CONSTANT:.6f}")
 
     # Optionally print out the top few combos
     # This is a bit more advanced, sorting or partial sorting the combos by mean reward
     sorted_indices = jnp.argsort(-mean_rewards)  # descending
     top5 = sorted_indices[:5]
-    print("\nTop 5 combos (interval, threshold) by mean reward:")
+    log.info("Top 5 combos (interval, threshold) by mean reward:")
     for rank, idx in enumerate(top5, start=1):
-        print(f"Rank {rank}: interval={combos[idx,0]}, threshold={combos[idx,1]}, "
-              f"mean_reward={mean_rewards[idx]/NORM_CONSTANT:.6f}, done_any={any_dones_per_combo[idx]}")
+        log.info(f"Rank {rank}: interval={combos[idx,0]}, threshold={combos[idx,1]}, "
+                f"mean_reward={mean_rewards[idx]/NORM_CONSTANT:.6f}")
+        if not any_dones_per_combo[idx]:
+            log.warning(f"Warning: No episodes ended in a done state for this combo.")
+        if not jnp.allclose(mean_rewards[idx], mean_logs[idx]):
+            log.warning(f"Warning: Mean results from the heuristic policy and log wrapper do not match.")
+        if not jnp.allclose(std_rewards[idx], std_logs[idx]):
+            log.warning(f"Warning: Std results from the heuristic policy and log wrapper do not match.")
 
-    # If you’d like a histogram for a single combo or the best combo:
+    # If you'd like a histogram for a single combo or the best combo:
     if plot_hist:
-        # e.g., histogram of all episodes of the best combo
         plt.hist(rewards[best_idx], bins=20)
         plt.title(f"Histogram of Rewards for Best Combo: (i={best_interval}, t={best_threshold})")
         plt.xlabel("Total reward")
@@ -209,4 +230,4 @@ def main(plot_hist=True):
 
 
 if __name__ == "__main__":
-    main(plot_hist=False)
+    main()
