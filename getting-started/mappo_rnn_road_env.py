@@ -918,6 +918,10 @@ def main(config):
 
     config = OmegaConf.to_container(config)
     print("Config:\n", OmegaConf.to_yaml(config))
+
+    if config.get("DOUBLE_PRECISION_MODE", False):
+        jax.config.update("jax_enable_x64", True)
+
     if config["HYP_TUNE"]:
         tune(config)
     else:

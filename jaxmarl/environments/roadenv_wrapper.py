@@ -69,8 +69,6 @@ class RoadEnvironment_Wrapper(object):
         obs = {agent: obs[i] for i, agent in enumerate(self.agents)}
         obs.update({"__all__": global_state})
 
-        state = self.convert_state_to_float32(state)
-
         return obs, state
 
     @partial(jax.jit, static_argnums=(0,))
@@ -111,8 +109,6 @@ class RoadEnvironment_Wrapper(object):
             [actions[agent] for agent in self.agents], dtype=jnp.int32
         )
 
-        state = self.convert_state_to_float64(state)
-
         _, next_state, reward, done, info = self.env.step_env(key, state, array_actions)
         next_obs = self.get_obs(next_state).astype(jnp.float32)
         global_state = self.get_global_state(next_obs, next_state).astype(jnp.float32)
@@ -126,8 +122,6 @@ class RoadEnvironment_Wrapper(object):
         dones = {agent: done for a, agent in enumerate(self.agents)}
         next_obs.update({"__all__": global_state})
         dones.update({"__all__": done})
-
-        next_state = self.convert_state_to_float32(next_state)
 
         return next_obs, next_state, rewards, dones, info
 
@@ -168,49 +162,6 @@ class RoadEnvironment_Wrapper(object):
         num_component_actions = len(self.env.action_map)
         return {agent: list(range(num_component_actions)) for agent in self.agents}
 
-    @staticmethod
-    def convert_state_to_float32(state):
-        """
-        Converts all attributes of state object to float32 by creating
-        a new object.
-        """
-
-        env_state = EnvState(
-            damage_state=state.damage_state.astype(jnp.int32),
-            observation=state.observation.astype(jnp.int32),
-            belief=state.belief.astype(jnp.float32),
-            base_travel_time=state.base_travel_time.astype(jnp.float32),
-            capacity=state.capacity.astype(jnp.float32),
-            worst_obs_counter=state.worst_obs_counter.astype(jnp.int32),
-            deterioration_rate=state.deterioration_rate.astype(jnp.int32),
-            timestep=state.timestep,
-            budget_remaining=state.budget_remaining,
-            episode_return=state.episode_return,
-        )
-
-        return env_state
-
-    @staticmethod
-    def convert_state_to_float64(state):
-        """
-        Converts all attributes of state object to float64 by creating
-        a new object.
-        """
-
-        env_state = EnvState(
-            damage_state=state.damage_state.astype(jnp.int64),
-            observation=state.observation.astype(jnp.int64),
-            belief=state.belief.astype(jnp.float64),
-            base_travel_time=state.base_travel_time.astype(jnp.float64),
-            capacity=state.capacity.astype(jnp.float64),
-            worst_obs_counter=state.worst_obs_counter.astype(jnp.int64),
-            deterioration_rate=state.deterioration_rate.astype(jnp.int64),
-            timestep=state.timestep,
-            budget_remaining=state.budget_remaining,
-            episode_return=state.episode_return,
-        )
-
-        return env_state
 
     @staticmethod
     def sinusoidal_encoding(position, d_model):
@@ -237,6 +188,7 @@ class RoadEnvironment_Wrapper(object):
         binary_ids = ((ids[:, None] & bit_masks) > 0).astype(jnp.int32)
         return binary_ids
     
+
     @property
     def name(self) -> str:
         """Environment name."""

@@ -21,3 +21,6 @@
 "ENTITY": ""
 "PROJECT": "jaxmarl-road-env"
 "WANDB_MODE" : "disabled"
+
+# precision
+"DOUBLE_PRECISION_MODE": False # use double precision for the environment
