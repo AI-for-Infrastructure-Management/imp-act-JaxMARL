@@ -49,6 +49,8 @@ class RoadEnvironment_Wrapper(object):
             self.agent_encodings = self.generate_binary_agent_ids(self.num_agents)
         elif encoding_type == "one-hot":
             self.agent_encodings = jnp.eye(self.num_agents, dtype=jnp.float32)
+        elif encoding_type == "none":
+            self.agent_encodings = jnp.zeros((self.num_agents, 0), dtype=jnp.float32)
         else:
             raise ValueError(f"Unsupported encoding_type: {encoding_type}")
         agent_encoding_dim = self.agent_encodings.shape[1]
@@ -228,8 +230,8 @@ class RoadEnvironment_Wrapper(object):
     
     @staticmethod
     def generate_binary_agent_ids(num_agents):
-        num_bits = int(jnp.ceil(jnp.log2(num_agents)))
-        ids = jnp.arange(num_agents)
+        num_bits = int(jnp.ceil(jnp.log2(num_agents + 1)))  # +1 to avoid zero
+        ids = jnp.arange(num_agents) + 1 # start from 1 to avoid zero
         # Create mask for each bit (from highest to lowest)
         bit_masks = 1 << jnp.arange(num_bits - 1, -1, -1)
         binary_ids = ((ids[:, None] & bit_masks) > 0).astype(jnp.int32)
