@@ -1,0 +1,52 @@
+"TOTAL_TIMESTEPS": 10e6
+"NUM_ENVS": 128
+"LR": 0.001
+"UPDATE_EPOCHS": 4
+"NUM_MINIBATCHES": 4
+
+REWARD_STANDARDIZATION: True
+"MAX_GRAD_NORM": 0.5
+"ENT_COEF": 0.0
+"NUM_STEPS": 128
+"GAE_LAMBDA": 0.95
+"CLIP_EPS": 0.2
+"ACTIVATION": "relu" # hardcoded in the script
+"VF_COEF": 0.5
+
+"GRU_HIDDEN_DIM": 64
+"FC_DIM_SIZE": 64
+"GAMMA": 0.99
+"ANNEAL_LR": True
+"SCALE_CLIP_EPS": False
+
+# ENV
+"ENV_NAME": "road_env"
+"ENV_KWARGS": {"map_name": "ToyExample-v2"}
+
+# EVALUATION
+"TEST_DURING_TRAINING": True
+"TEST_INTERVAL": 0.1 # as a fraction of updates
+"TEST_NUM_STEPS": 50
+"TEST_NUM_ENVS": 1_000
+
+"ALG_NAME": "mappo_rnn"
+
+############ global params ############
+
+# experiment params
+"NUM_SEEDS": 2 # number of vmapped seeds
+"SEED": 0
+
+"HYP_TUNE": False # perform hyp tune
+
+# WandB Params
+"WANDB_MODE": "online"
+"ENTITY": "shaktimaan"
+"PROJECT": "impact-JaxMARL"
+"WANDB_LOG_ALL_SEEDS": False # will log vmapped seeds separately
+
+# where to save the params (if None, will not save)
+"SAVE_PATH": null
+
+# precision
+"DOUBLE_PRECISION_MODE": False # use double precision for the environment

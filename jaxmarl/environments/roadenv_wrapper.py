@@ -27,7 +27,7 @@ class State:
 class RoadEnvironment_Wrapper(object):
     """Jittable abstract base class for all jaxmarl Environments."""
 
-    def __init__(self, map_name) -> None:
+    def __init__(self, map_name, encoding_type="binary") -> None:
         """
         num_agents (int): maximum number of agents within the environment, used to set array dimensions
         """
@@ -37,11 +37,26 @@ class RoadEnvironment_Wrapper(object):
         self.agents = [f"agent_{a}" for a in range(self.num_agents)]
         num_damage_states = self.env.num_damage_states
         num_component_actions = len(self.env.action_map)
-        self.observation_spaces = {
-            i: Box(low=0, high=1, shape=(num_damage_states + 2,)) for i in self.agents
-        }
+        self.world_state_size = self.num_agents * num_damage_states + 2
         self.action_spaces = {
             agent: Discrete(num_component_actions) for agent in self.agents
+        }
+        if encoding_type == "sinusoidal":
+            self.agent_encodings = self.sinusoidal_encoding(
+                jnp.arange(self.num_agents), 16
+            )
+        elif encoding_type == "binary":
+            self.agent_encodings = self.generate_binary_agent_ids(self.num_agents)
+        elif encoding_type == "one-hot":
+            self.agent_encodings = jnp.eye(self.num_agents, dtype=jnp.float32)
+        elif encoding_type == "none":
+            self.agent_encodings = jnp.zeros((self.num_agents, 0), dtype=jnp.float32)
+        else:
+            raise ValueError(f"Unsupported encoding_type: {encoding_type}")
+        agent_encoding_dim = self.agent_encodings.shape[1]
+        self.observation_spaces = {
+            agent: Box(low=0, high=1, shape=(num_damage_states + 2 + agent_encoding_dim,))
+            for agent in self.agents
         }
 
     @partial(jax.jit, static_argnums=(0,))
@@ -50,9 +65,9 @@ class RoadEnvironment_Wrapper(object):
 
         _, state = self.env.reset(key)
         obs = self.get_obs(state).astype(jnp.float32)
-        obs = {agent: obs[a] for a, agent in enumerate(self.agents)}
-
-        state = self.convert_state_to_float32(state)
+        global_state = self.get_global_state(obs, state).astype(jnp.float32)
+        obs = {agent: obs[i] for i, agent in enumerate(self.agents)}
+        obs.update({"__all__": global_state})
 
         return obs, state
 
@@ -78,12 +93,9 @@ class RoadEnvironment_Wrapper(object):
             obs_re = self.get_obs(states_re)
 
         # Auto-reset environment based on termination
-        states = jax.tree.map(
-            lambda x, y: jax.lax.select(dones["__all__"], x, y), states_re, states_st
-        )
-        obs = jax.tree.map(
-            lambda x, y: jax.lax.select(dones["__all__"], x, y), obs_re, obs_st
-        )
+        states = jax.lax.cond(dones["__all__"],lambda: states_re, lambda: states_st)
+
+        obs = jax.lax.cond(dones["__all__"],lambda: obs_re,lambda: obs_st)
         #! TODO: add infos
         return obs, states, rewards, dones, {}
 
@@ -93,28 +105,27 @@ class RoadEnvironment_Wrapper(object):
         """Environment-specific step transition."""
 
         # convert actions dict to array
-        array_actions = jnp.array(
-            jax.tree_util.tree_leaves(actions), dtype=jnp.int32
-        ).squeeze()
-
-        state = self.convert_state_to_float64(state)
+        array_actions = jnp.stack(
+            [actions[agent] for agent in self.agents], dtype=jnp.int32
+        )
 
         _, next_state, reward, done, info = self.env.step_env(key, state, array_actions)
-        obs = self.get_obs(state).astype(jnp.float32)
+        next_obs = self.get_obs(next_state).astype(jnp.float32)
+        global_state = self.get_global_state(next_obs, next_state).astype(jnp.float32)
         reward = reward.astype(jnp.float32)
 
-        # make obs, reward, done dicts
+        # make next_obs, reward, done dicts
         # modify the done signal to include the "__all__" key
-        obs = {agent: obs[a] for a, agent in enumerate(self.agents)}
-        reward = {agent: reward for a, agent in enumerate(self.agents)}
+        next_obs = {agent: next_obs[a] for a, agent in enumerate(self.agents)}
+        rewards = {agent: reward for a, agent in enumerate(self.agents)}
+        rewards['__all__'] = reward
         dones = {agent: done for a, agent in enumerate(self.agents)}
+        next_obs.update({"__all__": global_state})
         dones.update({"__all__": done})
 
-        next_state = self.convert_state_to_float32(next_state)
+        return next_obs, next_state, rewards, dones, info
 
-        return obs, next_state, reward, dones, info
-
-    def get_obs(self, state: State) -> Dict[str, chex.Array]:
+    def get_obs(self, state: State) -> chex.Array:
         """
         Applies observation function to state.
         Returns the observation for each agent as an array.
@@ -124,11 +135,12 @@ class RoadEnvironment_Wrapper(object):
         N = self.env.total_num_segments
         _timestep = jnp.full((N, 1), state.timestep / self.env.max_timesteps)
         _budget = jnp.full((N, 1), state.budget_remaining / self.env.budget_amount)
-        return jnp.concatenate([state.belief, _timestep, _budget], axis=1)
+        return jnp.concatenate([state.belief, _timestep, _budget, self.agent_encodings], axis=1)
 
     def get_global_state(self, obs, state: State) -> Dict[str, chex.Array]:
-        # TODO: implement this function
-        raise NotImplementedError
+        _timestep = jnp.array([state.timestep / self.env.max_timesteps], dtype=jnp.float32)
+        _budget = jnp.array([state.budget_remaining / self.env.budget_amount], dtype=jnp.float32)
+        return jnp.concatenate([state.belief.flatten(), _timestep, _budget], axis=0)
 
     def observation_space(self, agent=None):
         """
@@ -150,49 +162,32 @@ class RoadEnvironment_Wrapper(object):
         num_component_actions = len(self.env.action_map)
         return {agent: list(range(num_component_actions)) for agent in self.agents}
 
-    @staticmethod
-    def convert_state_to_float32(state):
-        """
-        Converts all attributes of state object to float32 by creating
-        a new object.
-        """
-
-        env_state = EnvState(
-            damage_state=state.damage_state.astype(jnp.int32),
-            observation=state.observation.astype(jnp.int32),
-            belief=state.belief.astype(jnp.float32),
-            base_travel_time=state.base_travel_time.astype(jnp.float32),
-            capacity=state.capacity.astype(jnp.float32),
-            worst_obs_counter=state.worst_obs_counter.astype(jnp.int32),
-            deterioration_rate=state.deterioration_rate.astype(jnp.int32),
-            timestep=state.timestep,
-            budget_remaining=state.budget_remaining,
-            episode_return=state.episode_return,
-        )
-
-        return env_state
 
     @staticmethod
-    def convert_state_to_float64(state):
+    def sinusoidal_encoding(position, d_model):
         """
-        Converts all attributes of state object to float64 by creating
-        a new object.
+        position: int or [N] array of positions (e.g. agent ids or time steps)
+        d_model: dimension of the embedding
         """
+        position = jnp.atleast_1d(position).astype(jnp.float32)  # shape: [N]
+        i = jnp.arange(d_model)[None, :]  # shape: [1, d_model]
 
-        env_state = EnvState(
-            damage_state=state.damage_state.astype(jnp.int64),
-            observation=state.observation.astype(jnp.int64),
-            belief=state.belief.astype(jnp.float64),
-            base_travel_time=state.base_travel_time.astype(jnp.float64),
-            capacity=state.capacity.astype(jnp.float64),
-            worst_obs_counter=state.worst_obs_counter.astype(jnp.int64),
-            deterioration_rate=state.deterioration_rate.astype(jnp.int64),
-            timestep=state.timestep,
-            budget_remaining=state.budget_remaining,
-            episode_return=state.episode_return,
-        )
+        angle_rates = 1 / jnp.power(10000, (2 * (i // 2)) / d_model)
+        angle_rads = position[:, None] * angle_rates  # shape: [N, d_model]
 
-        return env_state
+        # Apply sin to even indices and cos to odd indices
+        angle_rads = jnp.where(i % 2 == 0, jnp.sin(angle_rads), jnp.cos(angle_rads))
+        return angle_rads  # shape: [N, d_model]
+    
+    @staticmethod
+    def generate_binary_agent_ids(num_agents):
+        num_bits = int(jnp.ceil(jnp.log2(num_agents + 1)))  # +1 to avoid zero
+        ids = jnp.arange(num_agents) + 1 # start from 1 to avoid zero
+        # Create mask for each bit (from highest to lowest)
+        bit_masks = 1 << jnp.arange(num_bits - 1, -1, -1)
+        binary_ids = ((ids[:, None] & bit_masks) > 0).astype(jnp.int32)
+        return binary_ids
+    
 
     @property
     def name(self) -> str:
