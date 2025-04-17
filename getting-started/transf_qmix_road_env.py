@@ -374,12 +374,54 @@ class EpsilonGreedy:
         return chosen_actions
 
 
+class CustomTrainState(TrainState):
+    """Custom train state with additional metrics for tracking"""
+    batch_stats: Any
+    timesteps: int = 0
+    n_updates: int = 0
+    grad_steps: int = 0
+    target_network_params: Any = None
+
+@chex.dataclass
+class RunningStats:
+    count: jnp.ndarray  # or float32
+    mean: jnp.ndarray
+    M2: jnp.ndarray
+
+def init_running_stats():
+    return RunningStats(
+        count=jnp.array(0.0, dtype=jnp.float32),
+        mean=jnp.array(0.0, dtype=jnp.float32),
+        M2=jnp.array(0.0, dtype=jnp.float32),
+    )
+
+def update_running_stats(stats: RunningStats, x: jnp.ndarray) -> RunningStats:
+    x = x.astype(jnp.float32)        # if x might be float64
+    batch_count = x.size
+    batch_sum = jnp.sum(x)
+    batch_mean = batch_sum / batch_count
+    batch_var = jnp.mean((x - batch_mean) ** 2)
+    batch_M2 = batch_var * batch_count
+
+    new_count = stats.count + jnp.asarray(batch_count, dtype=jnp.float32)
+    new_mean = (stats.count * stats.mean + batch_sum) / new_count
+    new_M2 = (
+        stats.M2
+        + batch_M2
+        + (stats.count * batch_count * (stats.mean - batch_mean) ** 2) / new_count
+    )
+    return RunningStats(count=new_count, mean=new_mean, M2=new_M2)
+
+def get_std(stats: RunningStats) -> jnp.ndarray:
+    return jnp.sqrt(stats.M2 / (stats.count + 1e-8))
+
 class Transition(NamedTuple):
     obs: dict
     actions: dict
     rewards: dict
     dones: dict
     infos: dict
+
 
 
 def tree_mean(tree):
@@ -518,14 +560,11 @@ def make_train(config, env):
 
         tx = optax.chain(
             optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-            optax.adam(learning_rate=lr, eps=config['EPS_ADAM']),
+            optax.radam(learning_rate=lr),
         )
 
         # to include the batch normalization stats
-        class TrainState_(TrainState):
-            batch_stats: Any
-
-        train_state = TrainState_.create(
+        train_state = CustomTrainState.create(
             apply_fn=agent.apply,
             params=network_params,
             batch_stats=network_stats,
@@ -589,7 +628,7 @@ def make_train(config, env):
         # TRAINING LOOP
         def _update_step(runner_state, unused):
 
-            train_state, target_network_state, env_state, buffer_state, time_state, init_obs, init_dones, test_metrics, rng = runner_state
+            train_state, target_network_state, env_state, buffer_state, time_state, init_obs, init_dones, test_metrics, rng, rnorm= runner_state
 
             # EPISODE STEP
             env_params = train_state.params['agent']
@@ -656,7 +695,7 @@ def make_train(config, env):
 
             def _network_update(carry, unused):
 
-                train_state, rng = carry
+                train_state, rng, rnorm = carry
 
                 # sample a batched trajectory from the buffer and set the time step dim in first axis
                 rng, _rng = jax.random.split(rng)
@@ -728,6 +767,13 @@ def make_train(config, env):
                         train=False,
                     )
 
+                    # --- REWARD STANDARDIZATION ---
+                    rewards = learn_traj.rewards['__all__']
+                    rewards_flat = jnp.ravel(rewards)
+                    new_rnorm = update_running_stats(rnorm, rewards_flat)
+                    std = get_std(new_rnorm)
+                    rewards_norm = (rewards - new_rnorm.mean) / (std + 1e-8)
+
                     # compute target
                     if config.get('TD_LAMBDA_LOSS', True):
                         # time difference loss
@@ -746,40 +792,56 @@ def make_train(config, env):
                         ret, td_targets = jax.lax.scan(
                             _td_lambda_target,
                             ret,
-                            (learn_traj.rewards['__all__'][-2::-1], learn_traj.dones['__all__'][-2::-1], target_max_qvals_mix[-1::-1])
+                            (rewards_norm[-2::-1], learn_traj.dones['__all__'][-2::-1], target_max_qvals_mix[-1::-1])
                         )
                         targets = td_targets[::-1]
                         loss = jnp.mean(0.5*((chosen_action_qvals_mix - jax.lax.stop_gradient(targets))**2))
                     else:
                         # standard DQN loss
                         targets = (
-                            learn_traj.rewards['__all__'][:-1]
+                            rewards_norm[:-1]
                             + config['GAMMA']*(1-learn_traj.dones['__all__'][:-1])*target_max_qvals_mix
                         )
                         loss = jnp.mean((chosen_action_qvals_mix - jax.lax.stop_gradient(targets))**2)
                     
                     batch_norm_update = {'agent':updates_agent['batch_stats'], 'mixer':updates_mixer['batch_stats']}
-                    return loss, (targets, batch_norm_update)
+                    return loss, (targets, batch_norm_update, new_rnorm)
 
                 # compute loss and optimize grad
                 grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
-                (loss, (targets, batch_norm_update)), grads = grad_fn(train_state.params, init_hs, learn_traj)
+                (loss, (targets, batch_norm_update, new_rnorm)), grads = grad_fn(train_state.params, init_hs, learn_traj)
                 train_state = train_state.apply_gradients(grads=grads)
                 train_state = train_state.replace(batch_stats=batch_norm_update)
 
                 update_info = {'loss':loss, 'targets':targets.mean(), 'grad':tree_mean(grads)}
 
-                return (train_state, rng), update_info
+                return (train_state, rng, new_rnorm), update_info
 
             # perform n updates over the network
             rng, _rng = jax.random.split(rng)
+            
+            # Check if we have enough experience and if we've reached the learning starts threshold
+            is_learn_time = (
+                buffer.can_sample(buffer_state)
+            ) & (  # enough experience in buffer
+                train_state.timesteps > config.get("LEARNING_STARTS", 0)
+            )
+            
             update_info_zero = dict(zip(['loss', 'targets', 'grad'], [jnp.zeros(config['N_MINI_UPDATES'], dtype=jnp.float32)]*3)) # default update info when cannot sample
-            (train_state, rng), update_info = jax.lax.cond(
-                buffer.can_sample(buffer_state),
-                lambda train_state, rng: jax.lax.scan(_network_update, (train_state, rng), None, config['N_MINI_UPDATES']),
-                lambda train_state, rng: ((train_state, rng), update_info_zero), # do nothing
+            (train_state, rng, rnorm), update_info = jax.lax.cond(
+                is_learn_time,
+                lambda train_state, rng, rnorm: jax.lax.scan(_network_update, (train_state, rng, rnorm), None, config['N_MINI_UPDATES']),
+                lambda train_state, rng, rnorm: ((train_state, rng, rnorm), update_info_zero), # do nothing
                 train_state,
-                _rng
+                _rng,
+                rnorm
+            )
+            
+            # Update train state tracking metrics - use JAX-compatible update
+            train_state = train_state.replace(
+                timesteps=time_state['timesteps']*config['NUM_ENVS'],
+                n_updates=time_state['updates'],
+                grad_steps=train_state.grad_steps + jnp.where(is_learn_time, config['N_MINI_UPDATES'], 0)
             )
 
             # UPDATE THE VARIABLES AND RETURN
@@ -795,7 +857,14 @@ def make_train(config, env):
             # update the target network if necessary
             target_network_state = jax.lax.cond(
                 time_state['updates'] % config['TARGET_UPDATE_INTERVAL'] == 0,
-                lambda _: {'params':copy_tree(train_state.params), 'batch_stats':copy_tree(train_state.batch_stats)},
+                lambda _: {
+                    'params': optax.incremental_update(
+                        train_state.params, 
+                        target_network_state['params'],
+                        config.get('TAU', 1.0)
+                    ),
+                    'batch_stats': copy_tree(train_state.batch_stats)
+                },
                 lambda _: target_network_state,
                 operand=None
             )
@@ -825,7 +894,7 @@ def make_train(config, env):
             }
 
             if config.get('WANDB_MODE', "disabled") != "disabled":
-                def callback(metrics, infos):
+                def callback(metrics, rnorm, infos):
                     info_metrics = {
                         k:v[...,0][infos["returned_episode"][..., 0]].mean()
                         for k,v in infos.items() if k!="returned_episode"
@@ -833,11 +902,20 @@ def make_train(config, env):
                     metrics = {
                         **{k:float(v) for k,v in metrics["running_metrics"].items()},
                         **{k:float(v) for k,v in info_metrics.items()},
-                        **{k:float(v.mean()) for k, v in metrics['test_metrics'].items()}
+                        **{k:float(v.mean()) for k, v in metrics['test_metrics'].items()},
+                        'rnorm_mean': float(rnorm.mean.item()),
+                        'rnorm_std': float(get_std(rnorm).item()),
+                        'rnorm_count': float(rnorm.count.item()),
                     }
+                    
+                    # Add GPU memory stats when available
+                    try:
+                        metrics["gpu_stats"] = jax.devices()[0].memory_stats()
+                    except (IndexError, AttributeError):
+                        pass
 
                     wandb.log(metrics, step=int(metrics['env_step'])) # log the metrics
-                jax.debug.callback(callback, metrics, traj_batch.infos)
+                jax.debug.callback(callback, metrics, rnorm, traj_batch.infos)
 
             runner_state = (
                 train_state,
@@ -848,7 +926,8 @@ def make_train(config, env):
                 init_obs,
                 init_dones,
                 test_metrics,
-                rng
+                rng,
+                rnorm
             )
 
             return runner_state, None # don't return metrics if you're using wandb to save memory
@@ -919,42 +998,31 @@ def make_train(config, env):
             init_obs,
             init_dones,
             test_metrics,
-            _rng
+            _rng,
+            init_running_stats()
         )
         runner_state, metrics = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
-        return {'runner_state':runner_state, 'metrics':metrics}
+        return {'runner_state':runner_state, 'metrics':None} # don't return metrics if you're using wandb to save memory
     
     return train
 
 
 def env_from_config(config):
-    env_name = config["ENV_NAME"]
-    # smax init neeeds a scenario
-    if "smax" in env_name.lower():
-        config["ENV_KWARGS"]["scenario"] = map_name_to_scenario(config["MAP_NAME"])
-        env_name = f"{config['ENV_NAME']}_{config['MAP_NAME']}"
-        env = make(config["ENV_NAME"], **config["ENV_KWARGS"])
-        env = SMAXLogWrapper(env)
-    elif "mpe" in env_name.lower():
-        env = make(config["ENV_NAME"], **config["ENV_KWARGS"])
-        env = MPELogWrapper(env)
-    elif "road_env" in env_name.lower():
-        env = make(config["ENV_NAME"], **config["ENV_KWARGS"])
-        env = LogWrapper(env)
-    else:
-        raise NotImplementedError(f"Environment {env_name} not implemented.")
-    return env, env_name
+    env = make(config["ENV_NAME"], **config["ENV_KWARGS"])
+    env = LogWrapper(env)
+    return env, config["ENV_NAME"]
 
 def single_run(config):
-    print("Config:\n", OmegaConf.to_yaml(config))
-
     alg_name = config.get("ALG_NAME", "transf_qmix")
     env, env_name = env_from_config(copy.deepcopy(config))
 
-    map_name = config["ENV_KWARGS"].get("map_name", "default")
+    config["TOTAL_TIMESTEPS"] = (
+        config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
+    )
 
+    map_name = config["ENV_KWARGS"].get("map_name", "default")
     project = config.get("PROJECT", "jaxMARL") + f"_{alg_name}" + f"_{map_name}"
 
     wandb.init(
@@ -972,9 +1040,10 @@ def single_run(config):
     )
 
     for k, v in dict(wandb.config).items():
-                config[k] = v
+        config[k] = v
     
-    print("Config:\n", OmegaConf.to_yaml(config))
+    print("Config:\n")
+    print(OmegaConf.to_yaml(config))
 
     rng = jax.random.PRNGKey(config["SEED"])
 
@@ -1059,6 +1128,10 @@ def tune(default_config):
 @hydra.main(version_base=None, config_path="./config", config_name="transf_qmix_road_env")
 def main(config):
     config = OmegaConf.to_container(config)
+
+    if config.get("DOUBLE_PRECISION_MODE", False):
+        jax.config.update("jax_enable_x64", True)
+
     if config["HYP_TUNE"]:
         tune(config)
     else:
