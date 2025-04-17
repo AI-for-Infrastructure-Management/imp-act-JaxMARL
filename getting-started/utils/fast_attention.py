@@ -258,7 +258,7 @@ def make_fast_generalized_attention(qkv_dim,
                                     unidirectional=False,
                                     lax_scan_unroll=1):
   """Construct a fast generalized attention menthod."""
-  logging.info('Fast generalized attention.: %s features and renormalize=%s',
+  logging.debug('Fast generalized attention.: %s features and renormalize=%s',
                nb_features, renormalize_attention)
   if features_type == 'ortho':
     matrix_creator = functools.partial(
