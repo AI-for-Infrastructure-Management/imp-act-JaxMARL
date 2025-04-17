@@ -307,7 +307,10 @@ def make_train(config):
 
 @hydra.main(version_base=None, config_path="config", config_name="ippo_ff_road_env")
 def main(config):
-    config = OmegaConf.to_container(config) 
+    config = OmegaConf.to_container(config)
+
+    if config.get("DOUBLE_PRECISION_MODE", False):
+        jax.config.update("jax_enable_x64", True)
 
     wandb.init(
         entity=config["ENTITY"],

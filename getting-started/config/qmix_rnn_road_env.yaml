@@ -22,13 +22,13 @@
 # ENV
 "ENV_NAME": "road_env"
 "ENV_KWARGS": {"map_name": "Cologne-v1"}
-"REW_SCALE": 1e-8
+"REW_SCALE": 1e-9
 
 # evaluate
 "TEST_DURING_TRAINING": True
-"TEST_INTERVAL": 0.005 # as a fraction of updates
-"TEST_NUM_STEPS": 101
-"TEST_NUM_ENVS": 500
+"TEST_INTERVAL": 0.01 # as a fraction of updates
+"TEST_NUM_STEPS": 51
+"TEST_NUM_ENVS": 1000
 
 "ALG_NAME": "qmix_rnn"
 
@@ -48,3 +48,6 @@
 
 # where to save the params (if None, will not save)
 "SAVE_PATH": null
+
+# precision
+"DOUBLE_PRECISION_MODE": False # use double precision for the environment

@@ -10,7 +10,7 @@ REWARD_STANDARDIZATION: True
 "NUM_STEPS": 128
 "GAE_LAMBDA": 0.95
 "CLIP_EPS": 0.2
-"ACTIVATION": "relu"
+"ACTIVATION": "relu" # hardcoded in the script
 "VF_COEF": 0.5
 
 "GRU_HIDDEN_DIM": 64
@@ -47,3 +47,6 @@ REWARD_STANDARDIZATION: True
 
 # where to save the params (if None, will not save)
 "SAVE_PATH": null
+
+# precision
+"DOUBLE_PRECISION_MODE": False # use double precision for the environment

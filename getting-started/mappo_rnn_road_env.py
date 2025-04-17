@@ -7,6 +7,7 @@ Adapted from: baselines/MAPPO/mappo_rnn_smax.py
 import os
 import copy
 import jax
+import chex
 import jax.numpy as jnp
 import flax.linen as nn
 import numpy as np
@@ -68,6 +69,7 @@ class ScannedRNN(nn.Module):
         rnn_state = carry
         ins, resets = x
 
+        # ToDO: Remove after fixing env
         # Ensure inputs are cast to float32
         ins = ins.astype(jnp.float32)
         resets = resets.astype(jnp.float32)
@@ -80,6 +82,7 @@ class ScannedRNN(nn.Module):
 
         new_rnn_state, y = nn.GRUCell(features=ins.shape[1])(rnn_state, ins)
 
+        # ToDO: Remove after fixing env
         # Ensure outputs are cast to float32
         new_rnn_state = new_rnn_state.astype(jnp.float32)
         y = y.astype(jnp.float32)
@@ -168,7 +171,6 @@ class Transition(NamedTuple):
 
 def batchify(x: dict, agent_list, num_actors):
     x = jnp.stack([x[a] for a in agent_list])
-    # print('batchify', x.shape)
     return x.reshape((num_actors, -1))
 
 
@@ -177,39 +179,40 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     return {a: x[i] for i, a in enumerate(agent_list)}
 
 
-def running_mean_std(mean, var, count, new_data):
-    """
-    Update running mean and variance with new data.
+@chex.dataclass
+class RunningStats:
+    count: jnp.ndarray  # or float32
+    mean: jnp.ndarray
+    var: jnp.ndarray
 
-    TODO: For now 1D array, Generalize to N-D array
 
-    Args:
-    - mean (jnp.array): Current running mean.
-    - var (jnp.array): Current running variance.
-    - count (float): Current sample count.
-    - new_data (jnp.array): Incoming batch of data.
+def init_running_stats():
+    return RunningStats(
+        count=jnp.array(0.0, dtype=jnp.float32),
+        mean=jnp.array(0.0, dtype=jnp.float32),
+        var=jnp.array(0.0, dtype=jnp.float32),
+    )
 
-    Returns:
-    - new_mean (jnp.array): Updated mean.
-    - new_var (jnp.array): Updated variance.
-    - new_count (float): Updated sample count.
 
-    Adapted from: https://github.com/uoe-agents/epymarl/blob/main/src/components/standarize_stream.py
-    """
-    batch_mean = jnp.mean(new_data, axis=0)
-    batch_var = jnp.var(new_data, axis=0)
-    batch_count = new_data.shape[0]
+def update_running_stats(stats: RunningStats, x: jnp.ndarray) -> RunningStats:
+    x = x.astype(jnp.float32)  # if x might be float64
+    batch_count = x.size
+    batch_mean = jnp.mean(x)
+    batch_var = jnp.var(x)
 
-    delta = batch_mean - mean
-    tot_count = count + batch_count
-
-    new_mean = mean + (delta * batch_count) / tot_count
-    m_a = var * count
+    delta = batch_mean - stats.mean
+    new_count = stats.count + batch_count
+    new_mean = stats.mean + (delta * batch_count) / new_count
+    m_a = stats.var * stats.count
     m_b = batch_var * batch_count
-    m_2 = m_a + m_b + (delta**2) * (count * batch_count) / tot_count
-    new_var = m_2 / tot_count
+    m_2 = m_a + m_b + (delta**2) * (stats.count * batch_count) / new_count
+    new_var = m_2 / new_count
 
-    return new_mean, new_var, tot_count
+    return RunningStats(count=new_count, mean=new_mean, var=new_var)
+
+
+def apply_normalization(stats: RunningStats, x):
+    return (x - stats.mean) / jnp.sqrt(stats.var + 1e-8)
 
 
 def make_train(config):
@@ -314,13 +317,6 @@ def make_train(config):
             config["NUM_ACTORS"], config["GRU_HIDDEN_DIM"]
         )
 
-        # INIT REWARD STANDARDIZATION
-        reward_mean, reward_var, reward_count = (
-            jnp.zeros((1,), dtype=jnp.float32),
-            jnp.zeros((1,), dtype=jnp.float32),
-            0,
-        )
-
         # TRAIN LOOP
         def _update_step(update_runner_state, unused):
             # COLLECT TRAJECTORIES
@@ -333,20 +329,14 @@ def make_train(config):
                     last_obs,
                     last_done,
                     hstates,
-                    reward_standardization,
+                    rnorm,
                     rng,
                 ) = runner_state
-
-                reward_mean, reward_var, reward_count = reward_standardization
 
                 # SELECT ACTION
                 rng, _rng = jax.random.split(rng)
                 obs_batch = batchify(last_obs, env.agents, config["NUM_ACTORS"])
-                ac_in = (
-                    obs_batch[np.newaxis, :],
-                    last_done[np.newaxis, :],
-                )
-                # print('env step ac in', ac_in)
+                ac_in = (obs_batch[np.newaxis, :], last_done[np.newaxis, :])
                 ac_hstate, pi = actor_network.apply(
                     train_states[0].params, hstates[0], ac_in
                 )
@@ -377,12 +367,12 @@ def make_train(config):
                 obsv, env_state, reward, done, info = jax.vmap(
                     env.step, in_axes=(0, 0, 0)
                 )(rng_step, env_state, env_act)
-                rewards_ = batchify(reward, env.agents, config["NUM_ACTORS"]).squeeze()
+                rewards_flat = batchify(
+                    reward, env.agents, config["NUM_ACTORS"]
+                ).squeeze()
                 if config["REWARD_STANDARDIZATION"]:
-                    reward_mean, reward_var, reward_count = running_mean_std(
-                        reward_mean, reward_var, reward_count, rewards_
-                    )
-                    rewards_ = (rewards_ - reward_mean) / jnp.sqrt(reward_var + 1e-8)
+                    new_rnorm = update_running_stats(rnorm, rewards_flat)
+                    rewards_flat = apply_normalization(new_rnorm, rewards_flat)
                 info = jax.tree.map(lambda x: x.reshape((config["NUM_ACTORS"])), info)
                 done_batch = batchify(done, env.agents, config["NUM_ACTORS"]).squeeze()
                 transition = Transition(
@@ -390,7 +380,7 @@ def make_train(config):
                     last_done,
                     action.squeeze(),
                     value.squeeze(),
-                    rewards_,
+                    rewards_flat,
                     log_prob.squeeze(),
                     obs_batch,
                     world_state,
@@ -402,12 +392,12 @@ def make_train(config):
                     obsv,
                     done_batch,
                     (ac_hstate, cr_hstate),
-                    (reward_mean, reward_var, reward_count),
+                    new_rnorm,
                     rng,
                 )
                 return runner_state, transition
 
-            reward_standardization = runner_state[-2]
+            rnorm = runner_state[-2]
             initial_hstates = runner_state[-3]
             runner_state, traj_batch = jax.lax.scan(
                 _env_step, runner_state, None, config["NUM_STEPS"]
@@ -420,7 +410,7 @@ def make_train(config):
                 last_obs,
                 last_done,
                 hstates,
-                reward_standardization,
+                rnorm,
                 rng,
             ) = runner_state
 
@@ -640,6 +630,9 @@ def make_train(config):
                 traj_batch.info,
             )
             metrics["loss"] = loss_info
+            metrics["rnorm_mean"] = rnorm.mean
+            metrics["rnorm_std"] = jnp.sqrt(rnorm.var)
+            metrics["rnorm_count"] = rnorm.count
             rng = update_state[-1]
 
             # EVALUATION
@@ -687,7 +680,7 @@ def make_train(config):
                 last_obs,
                 last_done,
                 hstates,
-                reward_standardization,
+                rnorm,
                 rng,
             )
             return (runner_state, update_steps, eval_metrics), metrics
@@ -779,7 +772,7 @@ def make_train(config):
             obsv,
             jnp.zeros((config["NUM_ACTORS"]), dtype=bool),
             (ac_init_hstate, cr_init_hstate),
-            (reward_mean, reward_var, reward_count),
+            init_running_stats(),
             _rng,
         )
         runner_state, metrics = jax.lax.scan(
@@ -795,15 +788,19 @@ def make_train(config):
 
 def single_run(config):
 
+    num_seeds = config["NUM_SEEDS"]
+    alg_name = config["ALG_NAME"]
+    map_name = config["ENV_KWARGS"]["map_name"]
+
     wandb.init(
         entity=config["ENTITY"],
         project=config["PROJECT"],
-        tags=["MAPPO", "RNN"],
+        tags=["MAPPO", "RNN", map_name],
         config=config,
         mode=config["WANDB_MODE"],
     )
-    rng = jax.random.PRNGKey(config["SEED"])
 
+    rng = jax.random.PRNGKey(config["SEED"])
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
     train_vjit = jax.jit(jax.vmap(make_train(config)))
     outs = jax.block_until_ready(train_vjit(rngs))
@@ -823,10 +820,6 @@ def single_run(config):
         print(f"Seed {i}: {test_returns_max[i]:.2f}")
 
     ## Plotting
-    num_seeds = config["NUM_SEEDS"]
-    alg_name = config["ALG_NAME"]
-    map_name = config["ENV_KWARGS"]["map_name"]
-
     import matplotlib.pyplot as plt
 
     plt.plot(test_returns_mean)
@@ -839,7 +832,7 @@ def single_run(config):
     plt.xlabel("Eval Chckpts")
     plt.ylabel("Returns")
     plt.title(f"Runs ({num_seeds}) | {alg_name} on {map_name}")
-    plt.savefig("results/mappo_rnn_road_env.png", dpi=300)
+    plt.savefig("mappo_rnn_road_env.png", dpi=300)
     plt.show()
 
     # save model params
@@ -918,6 +911,10 @@ def main(config):
 
     config = OmegaConf.to_container(config)
     print("Config:\n", OmegaConf.to_yaml(config))
+
+    if config.get("DOUBLE_PRECISION_MODE", False):
+        jax.config.update("jax_enable_x64", True)
+
     if config["HYP_TUNE"]:
         tune(config)
     else:
