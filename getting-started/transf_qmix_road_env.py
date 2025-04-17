@@ -955,9 +955,11 @@ def single_run(config):
 
     map_name = config["ENV_KWARGS"].get("map_name", "default")
 
+    project = config.get("PROJECT", "jaxMARL") + f"_{alg_name}" + f"_{map_name}"
+
     wandb.init(
         entity=config["ENTITY"],
-        project=config["PROJECT"],
+        project=project,
         tags=[
             alg_name.upper(),
             env_name.upper(),

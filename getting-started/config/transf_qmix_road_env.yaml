@@ -50,7 +50,7 @@
 
 # wandb params
 "ENTITY": "imp-act"
-"PROJECT": "jaxMARL-transfQmix_ToyExample"
+"PROJECT": "jaxMARL"
 "WANDB_MODE": "online"
 "WANDB_LOG_ALL_SEEDS": False # will log separately the vmapped seeds
 
