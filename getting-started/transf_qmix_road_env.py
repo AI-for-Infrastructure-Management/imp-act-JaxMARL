@@ -384,7 +384,7 @@ class Transition(NamedTuple):
 
 def tree_mean(tree):
     return jnp.array(
-        jax.tree_leaves(jax.tree.map(lambda x: x.mean(), tree))
+        jax.tree.leaves(jax.tree.map(lambda x: x.mean(), tree))
     ).mean()
 
 
@@ -487,8 +487,8 @@ def make_train(config, env):
         network_stats  = {'agent':agent_params['batch_stats'],'mixer':mixer_params['batch_stats']}
 
         # print number of params
-        agent_params = sum(x.size for x in jax.tree_leaves(network_params['agent']))
-        mixer_params = sum(x.size for x in jax.tree_leaves(network_params['mixer']))
+        agent_params = sum(x.size for x in jax.tree.leaves(network_params['agent']))
+        mixer_params = sum(x.size for x in jax.tree.leaves(network_params['mixer']))
         jax.debug.print("Number of agent params: {x}", x=agent_params)
         jax.debug.print("Number of mixer params: {x}", x=mixer_params) 
         
@@ -953,6 +953,8 @@ def single_run(config):
     alg_name = config.get("ALG_NAME", "transf_qmix")
     env, env_name = env_from_config(copy.deepcopy(config))
 
+    map_name = config["ENV_KWARGS"].get("map_name", "default")
+
     wandb.init(
         entity=config["ENTITY"],
         project=config["PROJECT"],
@@ -960,11 +962,17 @@ def single_run(config):
             alg_name.upper(),
             env_name.upper(),
             f"jax_{jax.__version__}",
+            map_name.upper()
         ],
         name=f"{alg_name}_{env_name}",
         config=config,
         mode=config["WANDB_MODE"],
     )
+
+    for k, v in dict(wandb.config).items():
+                config[k] = v
+    
+    print("Config:\n", OmegaConf.to_yaml(config))
 
     rng = jax.random.PRNGKey(config["SEED"])
 
@@ -1049,7 +1057,6 @@ def tune(default_config):
 @hydra.main(version_base=None, config_path="./config", config_name="transf_qmix_road_env")
 def main(config):
     config = OmegaConf.to_container(config)
-    print("Config:\n", OmegaConf.to_yaml(config))
     if config["HYP_TUNE"]:
         tune(config)
     else:
