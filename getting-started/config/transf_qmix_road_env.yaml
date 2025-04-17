@@ -1,6 +1,6 @@
 "NUM_UPDATES": 6000
 "NUM_ENVS": 16
-"N_MINI_UPDATES": 8
+"N_MINI_UPDATES": 1
 "NUM_STEPS": 128
 "BUFFER_SIZE": 5000
 "BUFFER_BATCH_SIZE": 32
@@ -19,7 +19,7 @@
 "EPSILON_START": 0.2
 "EPSILON_FINISH": 0.00
 "EPSILON_ANNEAL_TIME": 100000
-"MAX_GRAD_NORM": 25.
+"MAX_GRAD_NORM": 0.5
 "TARGET_UPDATE_INTERVAL": 32
 "TAU": 1.0 # Parameter for incremental target network updates (1.0 = hard update, <1.0 = soft update)
 "LEARNING_STARTS": 10000 # Minimum number of steps before learning starts
