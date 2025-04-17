@@ -792,6 +792,9 @@ def single_run(config):
     alg_name = config["ALG_NAME"]
     map_name = config["ENV_KWARGS"]["map_name"]
 
+    if config["SEED"] == "random":
+        config["SEED"] = np.random.randint(0, 2**32 - 1)
+
     wandb.init(
         entity=config["ENTITY"],
         project=config["PROJECT"],
@@ -874,9 +877,15 @@ def tune(default_config):
         for k, v in dict(wandb.config).items():
             config[k] = v
 
+        if config["SEED"] == "random":
+            seed = np.random.randint(0, 2**32 - 1)
+            config["SAMPLED_SEED"] = seed
+        else:
+            seed = config["SEED"]
+
         config["FC_DIM_SIZE"] = config["GRU_HIDDEN_DIM"]
 
-        rng = jax.random.PRNGKey(config["SEED"])
+        rng = jax.random.PRNGKey(seed)
         rngs = jax.random.split(rng, config["NUM_SEEDS"])
         train_vjit = jax.jit(jax.vmap(make_train(config)))
         outs = jax.block_until_ready(train_vjit(rngs))
