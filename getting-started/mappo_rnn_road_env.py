@@ -24,6 +24,7 @@ from functools import partial
 
 import jaxmarl
 from jaxmarl.wrappers.baselines import LogWrapper, JaxMARLWrapper
+from jaxmarl.wrappers.baselines import save_params
 
 
 class RoadEnvWorldStateWrapper(JaxMARLWrapper):
@@ -691,6 +692,22 @@ def make_train(config):
                     }
                 )
 
+            # CHECKPOINTING
+            if config.get("IF_SAVE", False):
+
+                jax.lax.cond(
+                    update_steps % int(config["NUM_UPDATES"] * config["TEST_INTERVAL"])
+                    == 0,
+                    lambda _: jax.debug.callback(
+                        checkpoint_model,
+                        original_seed,
+                        train_states,
+                        update_steps,
+                    ),
+                    lambda _: None,
+                    operand=None,
+                )
+
             # report on wandb if required
             if config["WANDB_MODE"] != "disabled":
 
@@ -796,6 +813,30 @@ def make_train(config):
             )
             return metrics
 
+        def checkpoint_model(vmapped_seed, train_states, step):
+
+            experiment_id = config["experiment_id"]
+            alg_name = config["ALG_NAME"]
+            map_name = config["ENV_KWARGS"]["map_name"]
+            actor_state, critic_state = train_states
+            save_dir = os.path.join(
+                config["SAVE_PATH"],
+                alg_name,
+                map_name,
+                experiment_id,
+                str(vmapped_seed),
+            )
+            os.makedirs(save_dir, exist_ok=True)
+            OmegaConf.save(config, os.path.join(save_dir, f"config.yaml"))
+
+            actor_params = jax.tree.map(lambda x: x, actor_state.params)
+            save_path = os.path.join(save_dir, f"actor_{step}.safetensors")
+            save_params(actor_params, save_path)
+
+            critic_params = jax.tree.map(lambda x: x, critic_state.params)
+            save_path = os.path.join(save_dir, f"critic_{step}.safetensors")
+            save_params(critic_params, save_path)
+
         rng, _rng = jax.random.split(rng)
 
         # Metrics Manager
@@ -848,6 +889,8 @@ def single_run(config):
         mode=config["WANDB_MODE"],
     )
 
+    config["experiment_id"] = wandb.run.id
+
     rng = jax.random.PRNGKey(config["SEED"])
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
     train_vjit = jax.jit(jax.vmap(make_train(config)))
@@ -857,30 +900,6 @@ def single_run(config):
     eval_returns = metrics_manager.eval_returns
 
     wandb.run.summary["eval_returns"] = list(eval_returns)
-
-    # save model params
-    if config.get("SAVE_PATH", None) is not None:
-        from jaxmarl.wrappers.baselines import save_params
-
-        env_name = config["ENV_NAME"]
-        alg_name = config["ALG_NAME"]
-        model_state = outs["runner_state"][0]
-        save_dir = os.path.join(config["SAVE_PATH"], env_name)
-        os.makedirs(save_dir, exist_ok=True)
-        OmegaConf.save(
-            config,
-            os.path.join(
-                save_dir, f'{alg_name}_{env_name}_seed{config["SEED"]}_config.yaml'
-            ),
-        )
-
-        for i, rng in enumerate(rngs):
-            params = jax.tree.map(lambda x: x[i], model_state.params)
-            save_path = os.path.join(
-                save_dir,
-                f'{alg_name}_{env_name}_seed{config["SEED"]}_vmap{i}.safetensors',
-            )
-            save_params(params, save_path)
 
 
 def tune(default_config):
@@ -952,3 +971,29 @@ def main(config):
 
 if __name__ == "__main__":
     main()
+
+
+def load_checkpoint_agent(checkpoint_path, checkpoint_id):
+    from jaxmarl.wrappers.baselines import load_params
+
+    # load YAML
+    config = OmegaConf.load(os.path.join(checkpoint_path, "config.yaml"))
+    config = OmegaConf.to_container(config)
+
+    env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
+    env = RoadEnvWorldStateWrapper(env)
+    env = LogWrapper(env)
+
+    actor_network = ActorRNN(env.action_space(env.agents[0]).n, config=config)
+    critic_network = CriticRNN(config=config)
+
+    actor_params = load_params(
+        os.path.join(checkpoint_path, f"actor_{checkpoint_id}.safetensors")
+    )
+    critic_params = load_params(
+        os.path.join(checkpoint_path, f"critic_{checkpoint_id}.safetensors")
+    )
+    actor_network_params = jax.tree.map(lambda x: x, actor_params)
+    critic_network_params = jax.tree.map(lambda x: x, critic_params)
+
+    return actor_network, critic_network, actor_network_params, critic_network_params

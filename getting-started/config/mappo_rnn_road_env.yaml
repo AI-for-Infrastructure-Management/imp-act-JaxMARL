@@ -1,4 +1,4 @@
-NUM_UPDATES: 10
+NUM_UPDATES: 100
 NUM_ENVS: 32
 LR: 0.001
 UPDATE_EPOCHS: 4
@@ -25,7 +25,7 @@ ENV_KWARGS:
   map_name: ToyExample-v2
 
 # EVALUATION
-TEST_DURING_TRAINING: False
+TEST_DURING_TRAINING: True
 TEST_INTERVAL: 0.1 # as a fraction of updates
 TEST_NUM_STEPS: 50
 TEST_NUM_ENVS: 1_000
@@ -47,7 +47,8 @@ PROJECT: jaxMARL-mappo
 WANDB_LOG_ALL_SEEDS: False # will log vmapped seeds separately
 
 # where to save the params (if None, will not save)
-SAVE_PATH: null
+IF_SAVE: True
+SAVE_PATH: model_checkpoints/
 
 # precision
 DOUBLE_PRECISION_MODE: False # use double precision for the environment
