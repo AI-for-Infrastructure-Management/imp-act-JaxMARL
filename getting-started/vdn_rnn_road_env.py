@@ -644,10 +644,26 @@ def env_from_config(config):
 
 
 def single_run(config):
-    alg_name = config.get("ALG_NAME", "vdn_rnn")
-    env, env_name = env_from_config(copy.deepcopy(config))  ## First wrapper (LogWrapper)
+    alg_name = config.get("ALG_NAME", "qmix_rnn")
 
     map_name = config["ENV_KWARGS"].get("map_name", "default")
+    
+    wandb.init(
+        entity=config["ENTITY"],
+        project=f"{config['PROJECT']}_{map_name}",
+        tags=[
+            alg_name.upper(),
+            f"jax_{jax.__version__}",
+        ],
+        config=config,
+        mode=config["WANDB_MODE"],
+    )
+
+    # update the default params in case of overriding
+    for k, v in dict(wandb.config).items():
+        config[k] = v
+
+    env, env_name = env_from_config(copy.deepcopy(config))
 
     config["TOTAL_TIMESTEPS"] = (
         config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
@@ -655,21 +671,16 @@ def single_run(config):
 
     if config["SEED"] == "random":
         config["SEED"] = np.random.randint(0, 2**32 - 1)
+    
 
-    wandb.init(
-        entity=config["ENTITY"],
-        project=config["PROJECT"],
-        tags=[
-            alg_name.upper(),
-            env_name.upper(),
-            f"jax_{jax.__version__}",
-        ],
-        name=f"{alg_name}_{env_name}_{map_name}_{config['SEED']}",
-        config=config,
-        mode=config["WANDB_MODE"],
-    )
+    map_name = config["ENV_KWARGS"].get("map_name", "default")
 
-    rng = jax.random.PRNGKey(config["SEED"])
+    wandb.run.name = f"{alg_name}_{env_name}_{map_name}_{config['SEED']}"
+    wandb.run.save()
+    wandb.config.update(config, allow_val_change=True)
+
+    print("Config:\n", OmegaConf.to_yaml(config))
+
 
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
     train_vjit = jax.jit(jax.vmap(make_train(config, env)))
