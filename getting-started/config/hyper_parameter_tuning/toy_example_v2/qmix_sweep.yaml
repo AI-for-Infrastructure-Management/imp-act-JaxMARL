@@ -1,7 +1,8 @@
 command:
   - ${env}
   - python
-  - ${program} --config-path=./config/hyper_parameter_tuning/toy_example_v2
+  - ${program}
+  - --config-path=./config/hyper_parameter_tuning/toy_example_v2
 entity: imp-act
 method: random
 metric:
