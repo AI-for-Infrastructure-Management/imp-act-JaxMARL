@@ -687,14 +687,6 @@ def single_run(config):
     train_vjit = jax.jit(jax.vmap(make_train(config, env)))
     outs = jax.block_until_ready(train_vjit(rngs))
 
-    import matplotlib.pyplot as plt
-
-    plt.plot(outs["metrics"]["test_returned_episode_returns"].T / 1e6)
-    plt.xlabel("Updates")
-    plt.ylabel("Returns")
-    plt.title(f"{config['ALG_NAME']}={config['ENV_NAME']}")
-    plt.savefig(f"{hydra.core.hydra_config.HydraConfig.get().runtime.output_dir}/{config['ALG_NAME']}_{config['ENV_NAME']}.png")
-
     # save params
     if config.get("SAVE_PATH", None) is not None:
         from jaxmarl.wrappers.baselines import save_params
