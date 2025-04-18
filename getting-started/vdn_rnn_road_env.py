@@ -644,7 +644,7 @@ def env_from_config(config):
 
 
 def single_run(config):
-    alg_name = config.get("ALG_NAME", "qmix_rnn")
+    alg_name = config.get("ALG_NAME", "vdn_rnn")
 
     map_name = config["ENV_KWARGS"].get("map_name", "default")
     
