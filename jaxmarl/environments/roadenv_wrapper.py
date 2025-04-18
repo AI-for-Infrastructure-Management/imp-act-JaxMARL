@@ -46,8 +46,11 @@ class RoadEnvironment_Wrapper(object):
         extra_observation_size += self.set_agent_encodings(encoding_type)
         extra_observation_size += self.set_extra_observations(include_extra_observations)
         
+        lowest_obs = 0 if self.agent_encodings.shape[1] == 0 else jnp.min(self.agent_encodings)
+        highest_obs = 1 if self.volume_ratio_obs.shape[1] == 0 else jnp.max(self.volume_ratio_obs)
+
         self.observation_spaces = {
-            agent: Box(low=0, high=1, shape=(num_damage_states + 2 + extra_observation_size,))
+            agent: Box(low=lowest_obs, high=highest_obs, shape=(num_damage_states + 2 + extra_observation_size,))
             for agent in self.agents
         }
 
