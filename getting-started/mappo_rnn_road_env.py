@@ -220,8 +220,8 @@ def make_train(config):
     env = LogWrapper(env)
 
     config["NUM_ACTORS"] = env.num_agents * config["NUM_ENVS"]
-    config["NUM_UPDATES"] = (
-        config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
+    config["TOTAL_TIMESTEPS"] = (
+        config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
     )
     config["MINIBATCH_SIZE"] = (
         config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
@@ -790,6 +790,10 @@ def single_run(config):
     num_seeds = config["NUM_SEEDS"]
     alg_name = config["ALG_NAME"]
     map_name = config["ENV_KWARGS"]["map_name"]
+
+    config["TOTAL_TIMESTEPS"] = (
+        config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
+    )
 
     if config["SEED"] == "random":
         config["SEED"] = np.random.randint(0, 2**32 - 1)
