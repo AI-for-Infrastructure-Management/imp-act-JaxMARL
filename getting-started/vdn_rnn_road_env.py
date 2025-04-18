@@ -497,7 +497,6 @@ def make_train(config, env):
             )
 
             # UPDATE METRICS
-            print(type(env))
             train_state = train_state.replace(n_updates=train_state.n_updates + 1)
             metrics = {
                 "env_step": train_state.timesteps,
