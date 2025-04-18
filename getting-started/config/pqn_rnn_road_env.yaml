@@ -2,7 +2,7 @@
 "NUM_ENVS": 128
 "NUM_STEPS": 128
 "MEMORY_WINDOW": 4
-"HIDDEN_SIZE": 512
+"HIDDEN_SIZE": 256
 "NUM_LAYERS": 2
 "NORM_INPUT": True
 "NORM_TYPE": "batch_norm"
@@ -32,7 +32,7 @@
 # evaluate
 "TEST_DURING_TRAINING": True
 "TEST_INTERVAL": 0.01 # as a fraction of updates
-"TEST_NUM_STEPS": 51
+"TEST_NUM_STEPS": 50
 "TEST_NUM_ENVS": 1000
 
 "ALG_NAME": "pqn_rnn"
