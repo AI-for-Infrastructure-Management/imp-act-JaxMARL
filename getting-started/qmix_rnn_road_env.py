@@ -733,7 +733,6 @@ def single_run(config):
             alg_name.upper(),
             f"jax_{jax.__version__}",
         ],
-        name=f"{alg_name}_{env_name}_{map_name}_{config['SEED']}",
         config=config,
         mode=config["WANDB_MODE"],
     )
