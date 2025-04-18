@@ -32,7 +32,7 @@
 # evaluate
 "TEST_DURING_TRAINING": True
 "TEST_INTERVAL": 0.01 # as a fraction of updates
-"TEST_NUM_STEPS": 51
+"TEST_NUM_STEPS": 50
 "TEST_NUM_ENVS": 1000
 
 "ALG_NAME": "pqn_rnn"
@@ -47,7 +47,7 @@
 
 # wandb params
 "ENTITY": "imp-act"
-"PROJECT": "jaxMARL-pqn-test"
+"PROJECT": "jaxMARL"
 "WANDB_MODE": "online"
 "WANDB_LOG_ALL_SEEDS": False # will log separately the vmapped seeds
 
