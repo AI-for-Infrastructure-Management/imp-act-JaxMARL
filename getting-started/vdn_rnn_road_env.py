@@ -681,6 +681,7 @@ def single_run(config):
 
     print("Config:\n", OmegaConf.to_yaml(config))
 
+    rng = jax.random.PRNGKey(config["SEED"])
 
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
     train_vjit = jax.jit(jax.vmap(make_train(config, env)))
