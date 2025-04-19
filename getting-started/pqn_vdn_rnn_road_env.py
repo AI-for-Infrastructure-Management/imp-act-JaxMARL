@@ -464,7 +464,23 @@ def make_train(config, env):
                 "loss": loss.mean(),
                 "qvals": qvals.mean(),
             }
-            metrics.update(jax.tree.map(lambda x: x.mean(), infos))
+
+            log_wrapper_infos = jax.tree.map(
+                lambda x: jnp.nanmean(
+                    jnp.where(
+                        infos["returned_episode"],
+                        x,
+                        jnp.nan,
+                    )
+                ),
+                {
+                    "returned_episode": infos["returned_episode"], 
+                    "returned_episode_lengths": infos["returned_episode_lengths"],
+                    "returned_episode_returns": infos["returned_episode_returns"],
+                },
+            )
+
+            metrics.update(log_wrapper_infos)
 
             if config.get("TEST_DURING_TRAINING", True):
                 rng, _rng = jax.random.split(rng)
