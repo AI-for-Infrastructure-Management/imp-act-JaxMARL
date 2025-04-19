@@ -494,7 +494,7 @@ def make_train(config, env):
                         metrics_conversion["gpu_stats"] = jax.devices()[0].memory_stats()
                     except IndexError:
                         pass
-                    wandb.log(metrics, step=metrics["update_steps"])
+                    wandb.log(metrics_conversion, step=metrics["update_steps"])
 
                 jax.debug.callback(callback, metrics, original_seed)
 
