@@ -15,14 +15,10 @@ from omegaconf import OmegaConf
 import wandb
 
 from jaxmarl import make
-from jaxmarl.environments.smax import map_name_to_scenario
 from jaxmarl.wrappers.baselines import (
-    SMAXLogWrapper,
-    MPELogWrapper,
     LogWrapper,
     CTRolloutManager,
 )
-from jaxmarl.environments.overcooked import overcooked_layouts
 
 
 class ScannedRNN(nn.Module):
@@ -495,9 +491,9 @@ def make_train(config, env):
                         )
                     metrics_conversion = {k:float(v) for k,v in metrics.items()}
                     try:
-                         metrics_conversion["gpu_stats"] = jax.devices()[0].memory_stats()
+                        metrics_conversion["gpu_stats"] = jax.devices()[0].memory_stats()
                     except IndexError:
-                         pass
+                        pass
                     wandb.log(metrics, step=metrics["update_steps"])
 
                 jax.debug.callback(callback, metrics, original_seed)
