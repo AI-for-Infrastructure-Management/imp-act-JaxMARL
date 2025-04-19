@@ -54,7 +54,7 @@
 "WANDB_LOG_ALL_SEEDS": False # will log separately the vmapped seeds
 
 # where to save the params (if None, will not save)
-"SAVE_PATH": null
+"SAVE_PATH": "./models"
 
 # precision
 "DOUBLE_PRECISION_MODE": False # use double precision for the environment
