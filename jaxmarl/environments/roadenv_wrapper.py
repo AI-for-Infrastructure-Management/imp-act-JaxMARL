@@ -27,7 +27,7 @@ class State:
 class RoadEnvironment_Wrapper(object):
     """Jittable abstract base class for all jaxmarl Environments."""
 
-    def __init__(self, map_name, encoding_type="binary") -> None:
+    def __init__(self, map_name, encoding_type="binary", include_extra_observations: dict = {}) -> None:
         """
         num_agents (int): maximum number of agents within the environment, used to set array dimensions
         """
@@ -41,23 +41,78 @@ class RoadEnvironment_Wrapper(object):
         self.action_spaces = {
             agent: Discrete(num_component_actions) for agent in self.agents
         }
-        if encoding_type == "sinusoidal":
-            self.agent_encodings = self.sinusoidal_encoding(
-                jnp.arange(self.num_agents), 16
-            )
-        elif encoding_type == "binary":
-            self.agent_encodings = self.generate_binary_agent_ids(self.num_agents)
-        elif encoding_type == "one-hot":
-            self.agent_encodings = jnp.eye(self.num_agents, dtype=jnp.float32)
-        elif encoding_type == "none":
-            self.agent_encodings = jnp.zeros((self.num_agents, 0), dtype=jnp.float32)
-        else:
-            raise ValueError(f"Unsupported encoding_type: {encoding_type}")
-        agent_encoding_dim = self.agent_encodings.shape[1]
+
+        extra_observation_size = 0
+        extra_observation_size += self.set_agent_encodings(encoding_type)
+        extra_observation_size += self.set_extra_observations(include_extra_observations)
+        
         self.observation_spaces = {
-            agent: Box(low=0, high=1, shape=(num_damage_states + 2 + agent_encoding_dim,))
+            agent: Box(low=0, high=1, shape=(num_damage_states + 2 + extra_observation_size,))
             for agent in self.agents
         }
+
+    def set_agent_encodings(self, encoding_type):
+        """
+        Set agent encodings based on the encoding type.
+        """
+        if encoding_type == "sinusoidal":
+            d_model = 16
+            position = jnp.atleast_1d(jnp.arange(self.num_agents)).astype(jnp.float32)  # shape: [N]
+            i = jnp.arange(d_model)[None, :]  # shape: [1, d_model]
+
+            angle_rates = 1 / jnp.power(10000, (2 * (i // 2)) / d_model)
+            angle_rads = position[:, None] * angle_rates  # shape: [N, d_model]
+
+            # Apply sin to even indices and cos to odd indices
+            angle_rads = jnp.where(i % 2 == 0, jnp.sin(angle_rads), jnp.cos(angle_rads))
+            self.agent_encodings = angle_rads  # shape: [N, d_model]
+
+        elif encoding_type == "binary":
+            num_bits = int(jnp.ceil(jnp.log2(self.num_agents + 1)))  # +1 to avoid zero
+            ids = jnp.arange(self.num_agents) + 1 # start from 1 to avoid zero
+            # Create mask for each bit (from highest to lowest)
+            bit_masks = 1 << jnp.arange(num_bits - 1, -1, -1)
+            binary_ids = ((ids[:, None] & bit_masks) > 0).astype(jnp.int32)
+            self.agent_encodings = binary_ids
+
+        elif encoding_type == "one-hot":
+            self.agent_encodings = jnp.eye(self.num_agents, dtype=jnp.float32)
+
+        elif encoding_type == "none":
+            self.agent_encodings = jnp.zeros((self.num_agents, 0), dtype=jnp.float32)
+
+        else:
+            raise ValueError(f"Unsupported encoding_type: {encoding_type}")
+        
+        return self.agent_encodings.shape[1]
+
+    def set_extra_observations(self, include_extra_observations):
+        """
+        Set extra observations based on the include_extra_observations dictionary.
+        """
+        extra_observation_size = 0
+        if include_extra_observations.get("segment_lengths"):
+            extra_observation_size += 1
+            self.segment_lengths_obs = (
+                self.env.segment_lengths[:, None] 
+                / jnp.max(self.env.segment_lengths).astype(jnp.float32)
+            )
+        else:
+            self.segment_lengths_obs = jnp.zeros((self.num_agents, 0), dtype=jnp.float32)
+
+        if include_extra_observations.get("volumes"):
+            extra_observation_size += 1
+            self.volume_ratio_obs = (self.env.initial_edge_volumes / self.env.initial_capacities).astype(jnp.float32)[:, None]
+        else:
+            self.volume_ratio_obs = jnp.zeros((self.num_agents, 0), dtype=jnp.float32)
+        
+        if include_extra_observations.get("capacities"):
+            extra_observation_size += 1
+            self.capacity_obs = (self.env.initial_capacities / jnp.max(self.env.initial_capacities)).astype(jnp.float32)[:, None]
+        else:
+            self.capacity_obs = jnp.zeros((self.num_agents, 0), dtype=jnp.float32)
+        
+        return extra_observation_size
 
     @partial(jax.jit, static_argnums=(0,))
     def reset(self, key: chex.PRNGKey) -> Tuple[Dict[str, chex.Array], State]:
@@ -135,12 +190,29 @@ class RoadEnvironment_Wrapper(object):
         N = self.env.total_num_segments
         _timestep = jnp.full((N, 1), state.timestep / self.env.max_timesteps)
         _budget = jnp.full((N, 1), state.budget_remaining / self.env.budget_amount)
-        return jnp.concatenate([state.belief, _timestep, _budget, self.agent_encodings], axis=1)
+        return jnp.concatenate(
+            [
+                state.belief,
+                _timestep,
+                _budget,
+                self.agent_encodings,
+                self.segment_lengths_obs,
+                self.volume_ratio_obs,
+                self.capacity_obs,
+            ], axis=1)
 
     def get_global_state(self, obs, state: State) -> Dict[str, chex.Array]:
         _timestep = jnp.array([state.timestep / self.env.max_timesteps], dtype=jnp.float32)
         _budget = jnp.array([state.budget_remaining / self.env.budget_amount], dtype=jnp.float32)
-        return jnp.concatenate([state.belief.flatten(), _timestep, _budget], axis=0)
+        return jnp.concatenate(
+            [
+                state.belief.flatten(),
+                _timestep,
+                _budget,
+                self.segment_lengths_obs.flatten(),
+                self.volume_ratio_obs.flatten(),
+                self.capacity_obs.flatten(),
+            ], axis=0)
 
     def observation_space(self, agent=None):
         """
@@ -162,32 +234,6 @@ class RoadEnvironment_Wrapper(object):
         num_component_actions = len(self.env.action_map)
         return {agent: list(range(num_component_actions)) for agent in self.agents}
 
-
-    @staticmethod
-    def sinusoidal_encoding(position, d_model):
-        """
-        position: int or [N] array of positions (e.g. agent ids or time steps)
-        d_model: dimension of the embedding
-        """
-        position = jnp.atleast_1d(position).astype(jnp.float32)  # shape: [N]
-        i = jnp.arange(d_model)[None, :]  # shape: [1, d_model]
-
-        angle_rates = 1 / jnp.power(10000, (2 * (i // 2)) / d_model)
-        angle_rads = position[:, None] * angle_rates  # shape: [N, d_model]
-
-        # Apply sin to even indices and cos to odd indices
-        angle_rads = jnp.where(i % 2 == 0, jnp.sin(angle_rads), jnp.cos(angle_rads))
-        return angle_rads  # shape: [N, d_model]
-    
-    @staticmethod
-    def generate_binary_agent_ids(num_agents):
-        num_bits = int(jnp.ceil(jnp.log2(num_agents + 1)))  # +1 to avoid zero
-        ids = jnp.arange(num_agents) + 1 # start from 1 to avoid zero
-        # Create mask for each bit (from highest to lowest)
-        bit_masks = 1 << jnp.arange(num_bits - 1, -1, -1)
-        binary_ids = ((ids[:, None] & bit_masks) > 0).astype(jnp.int32)
-        return binary_ids
-    
 
     @property
     def name(self) -> str:
