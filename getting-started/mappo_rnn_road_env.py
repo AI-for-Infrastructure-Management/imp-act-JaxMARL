@@ -720,10 +720,10 @@ def make_train(config):
                             }
                         )
                     metrics_conversion = {k: float(v) for k, v in metrics.items()}
-                    if any(device.platform == "gpu" for device in jax.devices()):
-                        metrics_conversion["gpu_stats"] = jax.devices()[
-                            0
-                        ].memory_stats()
+                    try:
+                         metrics_conversion["gpu_stats"] = jax.devices()[0].memory_stats()
+                    except IndexError:
+                         pass
                     wandb.log(metrics_conversion, step=metrics["update_steps"])
 
                 jax.debug.callback(callback, metrics, original_seed)
