@@ -50,14 +50,6 @@ parameters:
   EPS_DECAY:
     values: [0.1, 0.2]
 
-  # --- Mixer Specific ---
-  MIXER_EMBEDDING_DIM:
-    values: [32, 64]
-  MIXER_HYPERNET_HIDDEN_DIM:
-    values: [128, 256]
-  MIXER_INIT_SCALE:
-    value: 0.001 # 1.00E-03
-
   # --- Environment/Reward ---
   REW_SCALE:
     value: 1.0e-8 # 1.00E-08
