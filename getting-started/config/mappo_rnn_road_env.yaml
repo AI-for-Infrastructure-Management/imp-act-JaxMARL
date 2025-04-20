@@ -14,7 +14,7 @@ ACTIVATION: relu # hardcoded in the script
 VF_COEF: 0.5
 
 GRU_HIDDEN_DIM: 64
-FC_DIM_SIZE: 64
+# FC_DIM_SIZE: null # embedding size for the GRU, must be same as the GRU hidden size, will be set in the script
 GAMMA: 0.99
 ANNEAL_LR: True
 SCALE_CLIP_EPS: False

@@ -868,7 +868,9 @@ def make_train(config):
 def single_run(config):
 
     alg_name = config.get("ALG_NAME", "mappo_rnn")
-    env_name, map_name = config["ENV_NAME"], config["ENV_KWARGS"]["map_name"]
+
+    env_name = config.get("env_name", "default")
+    map_name = config["ENV_KWARGS"].get("map_name", "default")
 
     wandb.init(
         entity=config["ENTITY"],
@@ -885,6 +887,8 @@ def single_run(config):
     for k, v in dict(wandb.config).items():
         config[k] = v
 
+    # embedding size for the GRU, must be same as the GRU hidden size
+    config["FC_DIM_SIZE"] = config["GRU_HIDDEN_DIM"]
     config["TOTAL_TIMESTEPS"] = (
         config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
     )
@@ -912,6 +916,7 @@ def tune(default_config):
     """Hyperparameter sweep with wandb."""
 
     alg_name = default_config["ALG_NAME"]
+    env_name = default_config["ENV_NAME"]
     map_name = default_config["ENV_KWARGS"]["map_name"]
 
     def wrapped_make_train():
@@ -922,13 +927,21 @@ def tune(default_config):
         for k, v in dict(wandb.config).items():
             config[k] = v
 
+        # embedding size for the GRU, must be same as the GRU hidden size
+        config["FC_HIDDEN_DIM"] = config["GRU_HIDDEN_DIM"]
+        config["TOTAL_TIMESTEPS"] = (
+            config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
+        )
+
         if config["SEED"] == "random":
             seed = np.random.randint(0, 2**32 - 1)
             config["SAMPLED_SEED"] = seed
         else:
             seed = config["SEED"]
 
-        config["FC_DIM_SIZE"] = config["GRU_HIDDEN_DIM"]
+        wandb.config.update(config)
+
+        print("running experiment with params:", config)
 
         rng = jax.random.PRNGKey(seed)
         rngs = jax.random.split(rng, config["NUM_SEEDS"])
@@ -936,7 +949,7 @@ def tune(default_config):
         outs = jax.block_until_ready(train_vjit(rngs))
 
     sweep_config = {
-        "name": f"{alg_name}_{map_name}",
+        "name": f"{alg_name}_{env_name}_{map_name}",
         "method": "grid",
         "metric": {
             "name": "test_eval_return",
