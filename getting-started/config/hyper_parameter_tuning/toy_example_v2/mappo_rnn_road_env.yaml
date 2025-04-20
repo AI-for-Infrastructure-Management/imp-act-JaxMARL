@@ -52,7 +52,6 @@ REWARD_STANDARDIZATION: True
 "WANDB_LOG_ALL_SEEDS": False # will log vmapped seeds separately
 
 # where to save the params (if None, will not save)
-IF_SAVE: False
 SAVE_PATH: null
 
 # precision

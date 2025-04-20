@@ -52,7 +52,6 @@ PROJECT: jaxMARL-mappo
 WANDB_LOG_ALL_SEEDS: False # will log vmapped seeds separately
 
 # where to save the params (if None, will not save)
-IF_SAVE: True
 SAVE_PATH: model_checkpoints/
 
 # precision
