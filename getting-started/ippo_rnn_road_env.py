@@ -658,60 +658,9 @@ def single_run(config):
     train_vjit = jax.jit(jax.vmap(make_train(config)))
     outs = jax.block_until_ready(train_vjit(rngs))
 
-    # shape: (num_seeds, num_evals)
-    test_returns = outs["runner_state"][-1] / 1e6
-    num_seeds, num_evals = test_returns.shape
-
-    # Aggregate test returns
-    test_returns_mean = jnp.mean(test_returns, axis=0)
-    test_returns_std = jnp.std(test_returns, axis=0)
-    test_returns_max = jnp.max(test_returns, axis=1)
-
-    ## Printing results
-    print(f"Max returns (over all seeds): {max(test_returns_max):.2f}")
-    for i in range(num_seeds):
-        print(f"Seed {i}: {test_returns_max[i]:.2f}")
-
-    ## Plotting
-    import matplotlib.pyplot as plt
-
-    plt.plot(test_returns_mean)
-    plt.fill_between(
-        np.arange(num_evals),
-        test_returns_mean - test_returns_std,
-        test_returns_mean + test_returns_std,
-        alpha=0.2,
-    )
-    plt.xlabel("Eval Chckpts")
-    plt.ylabel("Returns")
-    plt.title(f"Runs ({num_seeds}) | {alg_name} on {map_name}")
-    plt.savefig("ippo_rnn_road_env.png", dpi=300)
-    plt.show()
-
-    # save model params
-    if config.get("SAVE_PATH", None) is not None:
-        from jaxmarl.wrappers.baselines import save_params
-
-        env_name = config["ENV_NAME"]
-        alg_name = config["ALG_NAME"]
-        model_state = outs["runner_state"][0]
-        save_dir = os.path.join(config["SAVE_PATH"], env_name)
-        os.makedirs(save_dir, exist_ok=True)
-        OmegaConf.save(
-            config,
-            os.path.join(
-                save_dir, f'{alg_name}_{env_name}_seed{config["SEED"]}_config.yaml'
-            ),
-        )
-
-        for i, rng in enumerate(rngs):
-            params = jax.tree.map(lambda x: x[i], model_state.params)
-            save_path = os.path.join(
-                save_dir,
-                f'{alg_name}_{env_name}_seed{config["SEED"]}_vmap{i}.safetensors',
-            )
-            save_params(params, save_path)
-
+    # wandb summary
+    metrics_manager = outs["runner_state"][-1]
+    wandb.run.summary["eval_returns"] = list(metrics_manager.eval_returns)
 
 def tune(default_config):
     """Hyperparameter sweep with wandb."""
