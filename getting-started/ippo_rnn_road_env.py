@@ -21,6 +21,7 @@ from omegaconf import OmegaConf
 
 import jaxmarl
 from jaxmarl.wrappers.baselines import LogWrapper, JaxMARLWrapper
+from jaxmarl.wrappers.baselines import save_params
 
 import wandb
 import functools
@@ -552,6 +553,22 @@ def make_train(config):
                     }
                 )
 
+            # CHECKPOINTING
+            if config.get("IF_SAVE", False):
+
+                jax.lax.cond(
+                    update_steps % int(config["NUM_UPDATES"] * config["TEST_INTERVAL"])
+                    == 0,
+                    lambda _: jax.debug.callback(
+                        checkpoint_model,
+                        original_seed,
+                        train_state,
+                        update_steps,
+                    ),
+                    lambda _: None,
+                    operand=None,
+                )
+
             # report on wandb if required
             if config["WANDB_MODE"] != "disabled":
 
@@ -645,6 +662,24 @@ def make_train(config):
                 infos,
             )
             return metrics
+
+        def checkpoint_model(vmapped_seed, train_state, step):
+
+            alg_name = config["ALG_NAME"]
+            map_name = config["ENV_KWARGS"]["map_name"]
+            save_dir = os.path.join(
+                config["SAVE_PATH"],
+                alg_name,
+                map_name,
+                wandb.run.id,
+                str(vmapped_seed),
+            )
+            os.makedirs(save_dir, exist_ok=True)
+            OmegaConf.save(config, os.path.join(save_dir, f"config.yaml"))
+
+            params = jax.tree.map(lambda x: x, train_state.params)
+            save_path = os.path.join(save_dir, f"actor_critic_{step}.safetensors")
+            save_params(params, save_path)
 
         rng, _rng = jax.random.split(rng)
 
@@ -782,3 +817,22 @@ def main(config):
 
 if __name__ == "__main__":
     main()
+
+
+def load_checkpoint_agent(checkpoint_path, checkpoint_id):
+    from jaxmarl.wrappers.baselines import load_params
+
+    # load YAML
+    config = OmegaConf.load(os.path.join(checkpoint_path, "config.yaml"))
+    config = OmegaConf.to_container(config)
+
+    env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
+    env = LogWrapper(env)
+
+    network = ActorCriticRNN(env.action_space(env.agents[0]).n, config=config)
+    params = load_params(
+        os.path.join(checkpoint_path, f"actor_critic_{checkpoint_id}.safetensors")
+    )
+    params = jax.tree.map(lambda x: x, params)
+
+    return network, params
