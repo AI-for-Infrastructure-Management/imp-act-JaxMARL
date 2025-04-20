@@ -27,7 +27,9 @@ class State:
 class RoadEnvironment_Wrapper(object):
     """Jittable abstract base class for all jaxmarl Environments."""
 
-    def __init__(self, map_name, encoding_type="binary", include_extra_observations: dict = {}) -> None:
+    def __init__(
+        self, map_name, encoding_type="binary", include_extra_observations: dict = {}
+    ) -> None:
         """
         num_agents (int): maximum number of agents within the environment, used to set array dimensions
         """
@@ -37,22 +39,37 @@ class RoadEnvironment_Wrapper(object):
         self.agents = [f"agent_{a}" for a in range(self.num_agents)]
         num_damage_states = self.env.num_damage_states
         num_component_actions = len(self.env.action_map)
-        self.world_state_size = self.num_agents * num_damage_states + 2
         self.action_spaces = {
             agent: Discrete(num_component_actions) for agent in self.agents
         }
 
         extra_observation_size = 0
         extra_observation_size += self.set_agent_encodings(encoding_type)
-        extra_observation_size += self.set_extra_observations(include_extra_observations)
-        
-        lowest_obs = 0 if self.agent_encodings.shape[1] == 0 else jnp.min(self.agent_encodings)
-        highest_obs = 1 if self.volume_ratio_obs.shape[1] == 0 else jnp.max(self.volume_ratio_obs)
+        extra_observation_size += self.set_extra_observations(
+            include_extra_observations
+        )
+
+        lowest_obs = (
+            0 if self.agent_encodings.shape[1] == 0 else jnp.min(self.agent_encodings)
+        )
+        highest_obs = (
+            1 if self.volume_ratio_obs.shape[1] == 0 else jnp.max(self.volume_ratio_obs)
+        )
 
         self.observation_spaces = {
-            agent: Box(low=lowest_obs, high=highest_obs, shape=(num_damage_states + 2 + extra_observation_size,))
+            agent: Box(
+                low=lowest_obs,
+                high=highest_obs,
+                shape=(num_damage_states + 2 + extra_observation_size,),
+            )
             for agent in self.agents
         }
+
+        # agg. local features: num_agents * (extra_observation_size + num_damage_states)
+        # global features: 1 (norm. timestep) + 1 (norm. remaining budget) = 2
+        self.world_state_size = (
+            self.num_agents * (num_damage_states + extra_observation_size) + 2
+        )
 
     def set_agent_encodings(self, encoding_type):
         """
@@ -60,7 +77,9 @@ class RoadEnvironment_Wrapper(object):
         """
         if encoding_type == "sinusoidal":
             d_model = 16
-            position = jnp.atleast_1d(jnp.arange(self.num_agents)).astype(jnp.float32)  # shape: [N]
+            position = jnp.atleast_1d(jnp.arange(self.num_agents)).astype(
+                jnp.float32
+            )  # shape: [N]
             i = jnp.arange(d_model)[None, :]  # shape: [1, d_model]
 
             angle_rates = 1 / jnp.power(10000, (2 * (i // 2)) / d_model)
@@ -72,7 +91,7 @@ class RoadEnvironment_Wrapper(object):
 
         elif encoding_type == "binary":
             num_bits = int(jnp.ceil(jnp.log2(self.num_agents + 1)))  # +1 to avoid zero
-            ids = jnp.arange(self.num_agents) + 1 # start from 1 to avoid zero
+            ids = jnp.arange(self.num_agents) + 1  # start from 1 to avoid zero
             # Create mask for each bit (from highest to lowest)
             bit_masks = 1 << jnp.arange(num_bits - 1, -1, -1)
             binary_ids = ((ids[:, None] & bit_masks) > 0).astype(jnp.int32)
@@ -86,7 +105,7 @@ class RoadEnvironment_Wrapper(object):
 
         else:
             raise ValueError(f"Unsupported encoding_type: {encoding_type}")
-        
+
         return self.agent_encodings.shape[1]
 
     def set_extra_observations(self, include_extra_observations):
@@ -96,25 +115,30 @@ class RoadEnvironment_Wrapper(object):
         extra_observation_size = 0
         if include_extra_observations.get("segment_lengths"):
             extra_observation_size += 1
-            self.segment_lengths_obs = (
-                self.env.segment_lengths[:, None] 
-                / jnp.max(self.env.segment_lengths).astype(jnp.float32)
-            )
+            self.segment_lengths_obs = self.env.segment_lengths[:, None] / jnp.max(
+                self.env.segment_lengths
+            ).astype(jnp.float32)
         else:
-            self.segment_lengths_obs = jnp.zeros((self.num_agents, 0), dtype=jnp.float32)
+            self.segment_lengths_obs = jnp.zeros(
+                (self.num_agents, 0), dtype=jnp.float32
+            )
 
         if include_extra_observations.get("volumes"):
             extra_observation_size += 1
-            self.volume_ratio_obs = (self.env.initial_edge_volumes / self.env.initial_capacities).astype(jnp.float32)[:, None]
+            self.volume_ratio_obs = (
+                self.env.initial_edge_volumes / self.env.initial_capacities
+            ).astype(jnp.float32)[:, None]
         else:
             self.volume_ratio_obs = jnp.zeros((self.num_agents, 0), dtype=jnp.float32)
-        
+
         if include_extra_observations.get("capacities"):
             extra_observation_size += 1
-            self.capacity_obs = (self.env.initial_capacities / jnp.max(self.env.initial_capacities)).astype(jnp.float32)[:, None]
+            self.capacity_obs = (
+                self.env.initial_capacities / jnp.max(self.env.initial_capacities)
+            ).astype(jnp.float32)[:, None]
         else:
             self.capacity_obs = jnp.zeros((self.num_agents, 0), dtype=jnp.float32)
-        
+
         return extra_observation_size
 
     @partial(jax.jit, static_argnums=(0,))
@@ -151,9 +175,9 @@ class RoadEnvironment_Wrapper(object):
             obs_re = self.get_obs(states_re)
 
         # Auto-reset environment based on termination
-        states = jax.lax.cond(dones["__all__"],lambda: states_re, lambda: states_st)
+        states = jax.lax.cond(dones["__all__"], lambda: states_re, lambda: states_st)
 
-        obs = jax.lax.cond(dones["__all__"],lambda: obs_re,lambda: obs_st)
+        obs = jax.lax.cond(dones["__all__"], lambda: obs_re, lambda: obs_st)
         #! TODO: add infos
         return obs, states, rewards, dones, {}
 
@@ -176,7 +200,7 @@ class RoadEnvironment_Wrapper(object):
         # modify the done signal to include the "__all__" key
         next_obs = {agent: next_obs[a] for a, agent in enumerate(self.agents)}
         rewards = {agent: reward for a, agent in enumerate(self.agents)}
-        rewards['__all__'] = reward
+        rewards["__all__"] = reward
         dones = {agent: done for a, agent in enumerate(self.agents)}
         next_obs.update({"__all__": global_state})
         dones.update({"__all__": done})
@@ -202,11 +226,17 @@ class RoadEnvironment_Wrapper(object):
                 self.segment_lengths_obs,
                 self.volume_ratio_obs,
                 self.capacity_obs,
-            ], axis=1)
+            ],
+            axis=1,
+        )
 
     def get_global_state(self, obs, state: State) -> Dict[str, chex.Array]:
-        _timestep = jnp.array([state.timestep / self.env.max_timesteps], dtype=jnp.float32)
-        _budget = jnp.array([state.budget_remaining / self.env.budget_amount], dtype=jnp.float32)
+        _timestep = jnp.array(
+            [state.timestep / self.env.max_timesteps], dtype=jnp.float32
+        )
+        _budget = jnp.array(
+            [state.budget_remaining / self.env.budget_amount], dtype=jnp.float32
+        )
         return jnp.concatenate(
             [
                 state.belief.flatten(),
@@ -215,7 +245,9 @@ class RoadEnvironment_Wrapper(object):
                 self.segment_lengths_obs.flatten(),
                 self.volume_ratio_obs.flatten(),
                 self.capacity_obs.flatten(),
-            ], axis=0)
+            ],
+            axis=0,
+        )
 
     def observation_space(self, agent=None):
         """
@@ -236,7 +268,6 @@ class RoadEnvironment_Wrapper(object):
         """Returns the available actions for each agent."""
         num_component_actions = len(self.env.action_map)
         return {agent: list(range(num_component_actions)) for agent in self.agents}
-
 
     @property
     def name(self) -> str:
