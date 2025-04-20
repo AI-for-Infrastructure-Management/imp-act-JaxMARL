@@ -131,6 +131,14 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
 
 
 @chex.dataclass
+class EvalMetricsManager:
+    # reported with wandb.log during training
+    logged_eval_metrics: dict
+    # reported with wandb.run.summary at the end of training
+    eval_returns: jnp.ndarray
+
+
+@chex.dataclass
 class RunningStats:
     count: jnp.ndarray  # or float32
     mean: jnp.ndarray
@@ -234,7 +242,7 @@ def make_train(config):
         # TRAIN LOOP
         def _update_step(update_runner_state, unused):
             # COLLECT TRAJECTORIES
-            runner_state, update_steps, eval_metrics = update_runner_state
+            runner_state, update_steps, metrics_manager = update_runner_state
 
             def _env_step(runner_state, unused):
                 (
@@ -473,14 +481,13 @@ def make_train(config):
 
             # UPDATE METRICS
             train_state = update_state[0]
-            metrics = traj_batch.info
-            metrics = jax.tree.map(
-                lambda x: x.reshape(
-                    (config["NUM_STEPS"], config["NUM_ENVS"], env.num_agents)
+            rng = update_state[-1]
+            metrics = {
+                "update_steps": update_steps,
+                "env_step": (
+                    (update_steps + 1) * config["NUM_ENVS"] * config["NUM_STEPS"]
                 ),
-                traj_batch.info,
-            )
-            metrics["loss"] = {
+                # loss info
                 "total_loss": loss_info[0],
                 "value_loss": loss_info[1][0],
                 "actor_loss": loss_info[1][1],
@@ -489,35 +496,62 @@ def make_train(config):
                 "ratio_0": ratio_0,
                 "approx_kl": loss_info[1][4],
                 "clip_frac": loss_info[1][5],
+                # reward normalization
+                "rnorm_mean": rnorm.mean,
+                "rnorm_std": jnp.sqrt(rnorm.var),
+                "rnorm_count": rnorm.count,
             }
-            metrics["rnorm_mean"] = rnorm.mean
-            metrics["rnorm_std"] = jnp.sqrt(rnorm.var)
-            metrics["rnorm_count"] = rnorm.count
-            rng = update_state[-1]
+            log_wrapper_infos = jax.tree.map(
+                lambda x: jnp.nanmean(
+                    jnp.where(
+                        traj_batch.info["returned_episode"],
+                        x,
+                        jnp.nan,
+                    )
+                ),
+                {
+                    "returned_episode": traj_batch.info["returned_episode"],
+                    "returned_episode_lengths": traj_batch.info[
+                        "returned_episode_lengths"
+                    ],
+                    "returned_episode_returns": traj_batch.info[
+                        "returned_episode_returns"
+                    ],
+                },
+            )
+            metrics.update(log_wrapper_infos)
 
             # EVALUATION
             if config.get("TEST_DURING_TRAINING", True):
                 rng, _rng = jax.random.split(rng)
 
                 def eval_and_store_returns(rng, train_state):
-                    val = get_greedy_metrics(rng, train_state)[
-                        "returned_episode_returns"
-                    ]
+                    eval_metrics = get_greedy_metrics(rng, train_state)
                     idx = update_steps // int(
                         config["NUM_UPDATES"] * config["TEST_INTERVAL"]
                     )
-                    return eval_metrics.at[idx].set(val), val
+                    _metrics_manager = EvalMetricsManager(
+                        logged_eval_metrics=eval_metrics,
+                        eval_returns=metrics_manager.eval_returns.at[idx].set(
+                            eval_metrics["returned_episode_returns"]
+                        ),
+                    )
+                    return _metrics_manager
 
-                eval_metrics, eval_return = jax.lax.cond(
+                metrics_manager = jax.lax.cond(
                     update_steps % int(config["NUM_UPDATES"] * config["TEST_INTERVAL"])
                     == 0,
                     lambda _: eval_and_store_returns(_rng, train_state),
-                    lambda _: (eval_metrics, 0.0),
+                    lambda _: metrics_manager,
                     operand=None,
                 )
-                metrics.update({"test_eval_return": eval_return})
+                metrics.update(
+                    {
+                        "test_" + k: v
+                        for k, v in metrics_manager.logged_eval_metrics.items()
+                    }
+                )
 
-            metrics["update_steps"] = update_steps
             # report on wandb if required
             if config["WANDB_MODE"] != "disabled":
 
@@ -529,7 +563,8 @@ def make_train(config):
                                 for k, v in metrics.items()
                             }
                         )
-                    wandb.log(metrics)
+                    metrics_conversion = {k: float(v) for k, v in metrics.items()}
+                    wandb.log(metrics_conversion, step=metrics["update_steps"])
 
                 jax.debug.callback(callback, metrics, original_seed)
 
@@ -543,7 +578,7 @@ def make_train(config):
                 rnorm,
                 rng,
             )
-            return (runner_state, update_steps, eval_metrics), metrics
+            return (runner_state, update_steps, metrics_manager), metrics
 
         def get_greedy_metrics(rng, train_state):
             """Help function to test greedy policy during training"""
@@ -613,9 +648,12 @@ def make_train(config):
 
         rng, _rng = jax.random.split(rng)
 
-        # Storing evaluation metrics on CPU to save GPU memory
+        # Metrics Manager
         num_evals = int(1 / config["TEST_INTERVAL"])
-        initial_eval_metrics = jnp.zeros((num_evals,), device="cpu")
+        metrics_manager = EvalMetricsManager(
+            logged_eval_metrics=get_greedy_metrics(_rng, train_state),
+            eval_returns=jnp.zeros((num_evals,), device="cpu"),
+        )
 
         # train
         rng, _rng = jax.random.split(rng)
@@ -630,7 +668,7 @@ def make_train(config):
         )
         runner_state, metrics = jax.lax.scan(
             _update_step,
-            (runner_state, 0, initial_eval_metrics),
+            (runner_state, 0, metrics_manager),
             None,
             config["NUM_UPDATES"],
         )
