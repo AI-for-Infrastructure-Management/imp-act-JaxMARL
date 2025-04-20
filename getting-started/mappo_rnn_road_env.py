@@ -721,9 +721,11 @@ def make_train(config):
                         )
                     metrics_conversion = {k: float(v) for k, v in metrics.items()}
                     try:
-                         metrics_conversion["gpu_stats"] = jax.devices()[0].memory_stats()
+                        metrics_conversion["gpu_stats"] = jax.devices()[
+                            0
+                        ].memory_stats()
                     except IndexError:
-                         pass
+                        pass
                     wandb.log(metrics_conversion, step=metrics["update_steps"])
 
                 jax.debug.callback(callback, metrics, original_seed)
@@ -815,16 +817,11 @@ def make_train(config):
 
         def checkpoint_model(vmapped_seed, train_states, step):
 
-            experiment_id = config["experiment_id"]
             alg_name = config["ALG_NAME"]
             map_name = config["ENV_KWARGS"]["map_name"]
             actor_state, critic_state = train_states
             save_dir = os.path.join(
-                config["SAVE_PATH"],
-                alg_name,
-                map_name,
-                experiment_id,
-                str(vmapped_seed),
+                config["SAVE_PATH"], alg_name, map_name, wandb.run.id, str(vmapped_seed)
             )
             os.makedirs(save_dir, exist_ok=True)
             OmegaConf.save(config, os.path.join(save_dir, f"config.yaml"))
@@ -870,9 +867,23 @@ def make_train(config):
 
 def single_run(config):
 
-    num_seeds = config["NUM_SEEDS"]
-    alg_name = config["ALG_NAME"]
-    map_name = config["ENV_KWARGS"]["map_name"]
+    alg_name = config.get("ALG_NAME", "mappo_rnn")
+    env_name, map_name = config["ENV_NAME"], config["ENV_KWARGS"]["map_name"]
+
+    wandb.init(
+        entity=config["ENTITY"],
+        project=f"{config['PROJECT']}_{map_name}",
+        tags=[
+            alg_name.upper(),
+            f"jax_{jax.__version__}",
+        ],
+        config=config,
+        mode=config["WANDB_MODE"],
+    )
+
+    # update the default params in case of overriding
+    for k, v in dict(wandb.config).items():
+        config[k] = v
 
     config["TOTAL_TIMESTEPS"] = (
         config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
@@ -881,25 +892,20 @@ def single_run(config):
     if config["SEED"] == "random":
         config["SEED"] = np.random.randint(0, 2**32 - 1)
 
-    wandb.init(
-        entity=config["ENTITY"],
-        project=config["PROJECT"],
-        tags=["MAPPO", "RNN", map_name],
-        config=config,
-        mode=config["WANDB_MODE"],
-    )
+    wandb.run.name = f"{alg_name}_{env_name}_{map_name}_{config['SEED']}"
+    wandb.run.save()
+    wandb.config.update(config, allow_val_change=True)
 
-    config["experiment_id"] = wandb.run.id
+    print("Config:\n", OmegaConf.to_yaml(config))
 
     rng = jax.random.PRNGKey(config["SEED"])
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
     train_vjit = jax.jit(jax.vmap(make_train(config)))
     outs = jax.block_until_ready(train_vjit(rngs))
 
+    # wandb summary
     metrics_manager = outs["runner_state"][-1]
-    eval_returns = metrics_manager.eval_returns
-
-    wandb.run.summary["eval_returns"] = list(eval_returns)
+    wandb.run.summary["eval_returns"] = list(metrics_manager.eval_returns)
 
 
 def tune(default_config):
@@ -958,7 +964,6 @@ def tune(default_config):
 def main(config):
 
     config = OmegaConf.to_container(config)
-    print("Config:\n", OmegaConf.to_yaml(config))
 
     if config.get("DOUBLE_PRECISION_MODE", False):
         jax.config.update("jax_enable_x64", True)
