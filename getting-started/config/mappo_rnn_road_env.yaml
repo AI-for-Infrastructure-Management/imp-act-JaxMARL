@@ -23,7 +23,7 @@ SCALE_CLIP_EPS: False
 ENV_NAME: road_env
 ENV_KWARGS:
   map_name: ToyExample-v2
-  encoding_type: none       # can be binary, one-hot, sinusoidal or none
+  encoding_type: binary       # can be binary, one-hot, sinusoidal or none
   include_extra_observations: 
     segment_lengths: True     # Length of the segments
     volumes: True             # Volumes of the vehicles on the segment normalized by the segment capacity
@@ -52,7 +52,7 @@ PROJECT: jaxMARL-mappo
 WANDB_LOG_ALL_SEEDS: False # will log vmapped seeds separately
 
 # where to save the params (if None, will not save)
-SAVE_PATH: model_checkpoints/
+SAVE_PATH: null
 
 # precision
 DOUBLE_PRECISION_MODE: False # use double precision for the environment
