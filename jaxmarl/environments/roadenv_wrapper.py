@@ -43,11 +43,9 @@ class RoadEnvironment_Wrapper(object):
             agent: Discrete(num_component_actions) for agent in self.agents
         }
 
-        extra_observation_size = 0
-        extra_observation_size += self.set_agent_encodings(encoding_type)
-        extra_observation_size += self.set_extra_observations(
-            include_extra_observations
-        )
+        encoding_size = self.set_agent_encodings(encoding_type)
+        extra_features_size = self.set_extra_observations(include_extra_observations)
+        extra_observation_size = extra_features_size + encoding_size
 
         lowest_obs = (
             0 if self.agent_encodings.shape[1] == 0 else jnp.min(self.agent_encodings)
@@ -65,10 +63,10 @@ class RoadEnvironment_Wrapper(object):
             for agent in self.agents
         }
 
-        # agg. local features: num_agents * (extra_observation_size + num_damage_states)
+        # agg. local features: num_agents * (extra_features_size + num_damage_states)
         # global features: 1 (norm. timestep) + 1 (norm. remaining budget) = 2
         self.world_state_size = (
-            self.num_agents * (num_damage_states + extra_observation_size) + 2
+            self.num_agents * (num_damage_states + extra_features_size) + 2
         )
 
     def set_agent_encodings(self, encoding_type):
