@@ -554,7 +554,7 @@ def make_train(config):
                 )
 
             # CHECKPOINTING
-            if config.get("IF_SAVE", False):
+            if config.get("SAVE_PATH", None) is not None:
 
                 jax.lax.cond(
                     update_steps % int(config["NUM_UPDATES"] * config["TEST_INTERVAL"])
