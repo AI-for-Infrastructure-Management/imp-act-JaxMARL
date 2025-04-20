@@ -629,6 +629,10 @@ def make_train(config, env):
                             {f"rng{int(original_seed)}/{k}": v for k, v in metrics.items()}
                         )
                     metrics_conversion = {k:float(v) for k,v in metrics.items()}
+                    try:
+                         metrics_conversion["gpu_stats"] = jax.devices()[0].memory_stats()
+                    except IndexError:
+                         pass
                     wandb.log(metrics_conversion, step=metrics["update_steps"])
 
                 jax.debug.callback(callback, metrics, original_seed)
@@ -721,28 +725,41 @@ def env_from_config(config):
 
 def single_run(config):
     alg_name = config.get("ALG_NAME", "qmix_rnn")
+
+    map_name = config["ENV_KWARGS"].get("map_name", "default")
+    
+    wandb.init(
+        entity=config["ENTITY"],
+        project=f"{config['PROJECT']}_{map_name}",
+        tags=[
+            alg_name.upper(),
+            f"jax_{jax.__version__}",
+        ],
+        config=config,
+        mode=config["WANDB_MODE"],
+    )
+
+    # update the default params in case of overriding
+    for k, v in dict(wandb.config).items():
+        config[k] = v
+
     env, env_name = env_from_config(copy.deepcopy(config))
 
     config["TOTAL_TIMESTEPS"] = (
         config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
     )
 
-    map_name = config["ENV_KWARGS"].get("map_name", "default")
     if config["SEED"] == "random":
         config["SEED"] = np.random.randint(0, 2**32 - 1)
     
-    wandb.init(
-        entity=config["ENTITY"],
-        project=config["PROJECT"],
-        tags=[
-            alg_name.upper(),
-            env_name.upper(),
-            f"jax_{jax.__version__}",
-        ],
-        name=f"{alg_name}_{env_name}_{map_name}_{config['SEED']}",
-        config=config,
-        mode=config["WANDB_MODE"],
-    )
+
+    map_name = config["ENV_KWARGS"].get("map_name", "default")
+
+    wandb.run.name = f"{alg_name}_{env_name}_{map_name}_{config['SEED']}"
+    wandb.run.save()
+    wandb.config.update(config, allow_val_change=True)
+
+    print("Config:\n", OmegaConf.to_yaml(config))
 
     rng = jax.random.PRNGKey(config["SEED"])
 
@@ -875,7 +892,10 @@ def tune(default_config):
 @hydra.main(version_base=None, config_path="./config", config_name="qmix_rnn_road_env")
 def main(config):
     config = OmegaConf.to_container(config)
-    print("Config:\n", OmegaConf.to_yaml(config))
+
+    if config.get("DOUBLE_PRECISION_MODE", False):
+        jax.config.update("jax_enable_x64", True)
+
     if config["HYP_TUNE"]:
         tune(config)
     else:

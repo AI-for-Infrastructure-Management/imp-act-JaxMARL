@@ -1,0 +1,74 @@
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --config-path=./config/hyper_parameter_tuning/toy_example_v2
+entity: imp-act
+method: random
+metric:
+  goal: maximize
+  name: test_returned_episode_returns
+name: pqn_rnn_hyperparameter_tuning
+parameters:
+  # --- General Hyperparameters ---
+  NUM_UPDATES:
+    value: 3000
+  NUM_ENVS:
+    values: [32, 64, 128]
+  NUM_STEPS:
+    values: [51, 128]
+  MEMORY_WINDOW:
+    value: 4
+  HIDDEN_SIZE:
+    values: [64, 128, 256]
+  NUM_LAYERS:
+    value: 2
+  NORM_INPUT:
+    value: True
+  NORM_TYPE:
+    values: ["batch_norm", "layer_norm"]
+  MAX_GRAD_NORM:
+    values: [1, 10]
+  NUM_MINIBATCHES:
+    values: [4, 8, 16]
+  NUM_EPOCHS:
+    values: [2, 4, 8]
+  LR:
+    values: [0.001, 0.0001, 0.00001] # 1e-3, 1e-4, 1e-5
+  LR_LINEAR_DECAY:
+    value: False
+  GAMMA:
+    value: 0.99
+  LAMBDA:
+    values: [0.5, 0.85]
+
+  # --- Exploration ---
+  EPS_START:
+    value: 1
+  EPS_FINISH:
+    values: [0, 0.001]
+  EPS_DECAY:
+    values: [0.1, 0.2]
+
+  # --- Environment/Reward ---
+  REW_SCALE:
+    value: 1.0e-8 # 1.00E-08
+
+  # --- Environment Configuration ---
+  ENV_KWARGS:
+    values:
+      - encoding_type: binary
+        include_extra_observations:
+          segment_lengths: true
+          volumes: true
+          capacity: false
+        map_name: ToyExample-v2
+      - encoding_type: none
+        include_extra_observations:
+          segment_lengths: true
+          volumes: true
+          capacity: false
+        map_name: ToyExample-v2
+
+program: getting-started/pqn_vdn_rnn_road_env.py
+project: jaxMARL-ToyExample-v2

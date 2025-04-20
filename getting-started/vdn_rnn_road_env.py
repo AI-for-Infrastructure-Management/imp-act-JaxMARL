@@ -497,7 +497,6 @@ def make_train(config, env):
             )
 
             # UPDATE METRICS
-            print(type(env))
             train_state = train_state.replace(n_updates=train_state.n_updates + 1)
             metrics = {
                 "env_step": train_state.timesteps,
@@ -645,9 +644,25 @@ def env_from_config(config):
 
 def single_run(config):
     alg_name = config.get("ALG_NAME", "vdn_rnn")
-    env, env_name = env_from_config(copy.deepcopy(config))  ## First wrapper (LogWrapper)
 
     map_name = config["ENV_KWARGS"].get("map_name", "default")
+    
+    wandb.init(
+        entity=config["ENTITY"],
+        project=f"{config['PROJECT']}_{map_name}",
+        tags=[
+            alg_name.upper(),
+            f"jax_{jax.__version__}",
+        ],
+        config=config,
+        mode=config["WANDB_MODE"],
+    )
+
+    # update the default params in case of overriding
+    for k, v in dict(wandb.config).items():
+        config[k] = v
+
+    env, env_name = env_from_config(copy.deepcopy(config))
 
     config["TOTAL_TIMESTEPS"] = (
         config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
@@ -655,33 +670,21 @@ def single_run(config):
 
     if config["SEED"] == "random":
         config["SEED"] = np.random.randint(0, 2**32 - 1)
+    
 
-    wandb.init(
-        entity=config["ENTITY"],
-        project=config["PROJECT"],
-        tags=[
-            alg_name.upper(),
-            env_name.upper(),
-            f"jax_{jax.__version__}",
-        ],
-        name=f"{alg_name}_{env_name}_{map_name}_{config['SEED']}",
-        config=config,
-        mode=config["WANDB_MODE"],
-    )
+    map_name = config["ENV_KWARGS"].get("map_name", "default")
+
+    wandb.run.name = f"{alg_name}_{env_name}_{map_name}_{config['SEED']}"
+    wandb.run.save()
+    wandb.config.update(config, allow_val_change=True)
+
+    print("Config:\n", OmegaConf.to_yaml(config))
 
     rng = jax.random.PRNGKey(config["SEED"])
 
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
     train_vjit = jax.jit(jax.vmap(make_train(config, env)))
     outs = jax.block_until_ready(train_vjit(rngs))
-
-    import matplotlib.pyplot as plt
-
-    plt.plot(outs["metrics"]["test_returned_episode_returns"].T / 1e6)
-    plt.xlabel("Updates")
-    plt.ylabel("Returns")
-    plt.title(f"{config['ALG_NAME']}={config['ENV_NAME']}")
-    plt.savefig(f"{hydra.core.hydra_config.HydraConfig.get().runtime.output_dir}/{config['ALG_NAME']}_{config['ENV_NAME']}.png")
 
     # save params
     if config.get("SAVE_PATH", None) is not None:
@@ -792,8 +795,11 @@ def tune(default_config):
 @hydra.main(version_base=None, config_path="./config", config_name="vdn_rnn_road_env")
 def main(config):
     config = OmegaConf.to_container(config)
-
     print("Config:\n", OmegaConf.to_yaml(config))
+
+    if config.get("DOUBLE_PRECISION_MODE", False):
+        jax.config.update("jax_enable_x64", True)
+
     if config["HYP_TUNE"]:
         tune(config)
     else:

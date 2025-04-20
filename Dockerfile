@@ -36,18 +36,20 @@ RUN conda env create -f imp-act-JaxMARL/conda_environment.yaml
 ENV CONDA_DEFAULT_ENV=impact-jaxmarl-env
 ENV PATH=$CONDA_DIR/envs/impact-jaxmarl-env/bin:$PATH
 
-# Install JaxMARL
-# Modify JaxMARL dependency for CUDA
-RUN sed -i 's/jax==0.4.30/jax[cuda12]==0.4.30/' imp-act-JaxMARL/pyproject.toml
-# 2. Install JaxMARL with pip install -e ".[algs]"
+# Install Python Packages
+
+# 1. Modify Jax dependency for CUDA 
+RUN sed -i 's/jax==\(.*\)/jax[cuda12]==\1/' imp-act-JaxMARL/pyproject.toml
+
+# 2. Install JaxMARL
 RUN /bin/bash -c "source $CONDA_DIR/etc/profile.d/conda.sh && \
     conda activate impact-jaxmarl-env && \
     cd imp-act-JaxMARL && \
     pip install --no-cache-dir -e '.[algs]'"
-# Undo the JaxMARL dependency modification
-RUN sed -i 's/jax[cuda12]==0.4.30/jax==0.4.30/' imp-act-JaxMARL/pyproject.toml
+# Undo the Jax dependency modification
+RUN sed -i 's/jax\[cuda12\]==\(.*\)/jax==\1/' imp-act-JaxMARL/pyproject.toml
 
-# Install imp-act
+# 3. Install imp-act
 RUN /bin/bash -c "source $CONDA_DIR/etc/profile.d/conda.sh && \
     conda activate impact-jaxmarl-env && \
     cd imp-act-JaxMARL/imp-act && \
