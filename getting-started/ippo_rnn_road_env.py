@@ -679,17 +679,40 @@ def make_train(config):
 
 def single_run(config):
 
-    num_seeds = config["NUM_SEEDS"]
-    alg_name = config["ALG_NAME"]
-    map_name = config["ENV_KWARGS"]["map_name"]
+    alg_name = config.get("ALG_NAME", "mappo_rnn")
+
+    env_name = config.get("env_name", "default")
+    map_name = config["ENV_KWARGS"].get("map_name", "default")
 
     wandb.init(
         entity=config["ENTITY"],
-        project=config["PROJECT"],
-        tags=["IPPO", "RNN", map_name],
+        project=f"{config['PROJECT']}_{map_name}",
+        tags=[
+            alg_name.upper(),
+            f"jax_{jax.__version__}",
+        ],
         config=config,
         mode=config["WANDB_MODE"],
     )
+
+    # update the default params in case of overriding
+    for k, v in dict(wandb.config).items():
+        config[k] = v
+
+    # embedding size for the GRU, must be same as the GRU hidden size
+    config["FC_DIM_SIZE"] = config["GRU_HIDDEN_DIM"]
+    config["TOTAL_TIMESTEPS"] = (
+        config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
+    )
+
+    if config["SEED"] == "random":
+        config["SEED"] = np.random.randint(0, 2**32 - 1)
+
+    wandb.run.name = f"{alg_name}_{env_name}_{map_name}_{config['SEED']}"
+    wandb.run.save()
+    wandb.config.update(config, allow_val_change=True)
+
+    print("Config:\n", OmegaConf.to_yaml(config))
 
     rng = jax.random.PRNGKey(config["SEED"])
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
@@ -699,6 +722,7 @@ def single_run(config):
     # wandb summary
     metrics_manager = outs["runner_state"][-1]
     wandb.run.summary["eval_returns"] = list(metrics_manager.eval_returns)
+
 
 def tune(default_config):
     """Hyperparameter sweep with wandb."""
