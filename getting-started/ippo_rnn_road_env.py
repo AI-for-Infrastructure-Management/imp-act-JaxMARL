@@ -180,8 +180,8 @@ def make_train(config):
     env = LogWrapper(env)
 
     config["NUM_ACTORS"] = env.num_agents * config["NUM_ENVS"]
-    config["NUM_UPDATES"] = (
-        config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
+    config["TOTAL_TIMESTEPS"] = (
+        config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
     )
     config["MINIBATCH_SIZE"] = (
         config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
