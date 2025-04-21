@@ -1,6 +1,6 @@
 "NUM_UPDATES": 1500
 "NUM_ENVS": 128
-"NUM_STEPS": 128
+"NUM_STEPS": 51
 "MEMORY_WINDOW": 4
 "HIDDEN_SIZE": 128
 "NUM_LAYERS": 2
@@ -20,14 +20,14 @@
 # ENV
 "ENV_NAME": "road_env"
 "ENV_KWARGS":
-  "map_name": "ToyExample-v2"
+  "map_name": "Cologne-v1"
   "encoding_type": "none"       # can be binary, one-hot, sinusoidal or none
   "include_extra_observations": 
     "segment_lengths": True     # Length of the segments
     "volumes": True             # Volumes of the vehicles on the segment normalized by the segment capacity
     "capacity": False           # Capacity of the segments
 
-"REW_SCALE": 1e-8
+"REW_SCALE": 1e-9
 
 # evaluate
 "TEST_DURING_TRAINING": True
