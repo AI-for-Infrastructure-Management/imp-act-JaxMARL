@@ -1,0 +1,67 @@
+command:
+  - ${env}
+  - python
+  - ${program} 
+  - --config-path=./config/hyper_parameter_tuning/toy_example_v2
+entity: imp-act
+method: random
+metric:
+  goal: maximize
+  name: test_returned_episode_returns
+name: mappo_rnn_hyperparameter_tuning
+parameters:
+  # --- General Hyperparameters ---
+  NUM_UPDATES:
+    value: 1500
+  NUM_ENVS:
+    values: [32, 64, 128]
+  LR:
+    values: [1e-3, 1e-4, 1e-5]
+  UPDATE_EPOCHS:
+    values: [2, 4]
+  NUM_MINIBATCHES:
+    values: [2, 4, 8]
+  REWARD_STANDARDIZATION:
+    value: True
+  MAX_GRAD_NORM:
+    value: 0.5
+  ENT_COEF:
+    values: [0.0, 0.01]
+  NUM_STEPS:
+    values: [64, 128, 256]
+  GAE_LAMBDA:
+    values: [0.95, 1.0]
+  CLIP_EPS:
+    values: [0.1, 0.2, 0.3]
+  ACTIVATION:
+    value: relu # hardcoded in the script
+  VF_COEF:
+    values: [0.5, 1.0]
+  GRU_HIDDEN_DIM:
+    values: [32, 64, 128]
+  # FC_DIM_SIZE: ~ # embedding size for the GRU, must be same as the GRU hidden size, will be set in the script
+  GAMMA:
+    value: 0.99
+  ANNEAL_LR:
+    values: [True, False]
+  SCALE_CLIP_EPS:
+    value: False
+  
+  # --- Environment Configuration ---
+  ENV_KWARGS:
+    values:
+      - encoding_type: binary
+        include_extra_observations:
+          segment_lengths: true
+          volumes: true
+          capacity: false
+        map_name: ToyExample-v2
+      - encoding_type: none
+        include_extra_observations:
+          segment_lengths: true
+          volumes: true
+          capacity: false
+        map_name: ToyExample-v2
+
+program: getting-started/mappo_rnn_road_env.py
+project: jaxMARL-ToyExample-v2

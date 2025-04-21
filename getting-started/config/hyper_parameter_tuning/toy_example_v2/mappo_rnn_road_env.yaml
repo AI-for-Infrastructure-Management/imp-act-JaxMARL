@@ -1,10 +1,10 @@
-"TOTAL_TIMESTEPS": 10e6
+"NUM_UPDATES": 1500
 "NUM_ENVS": 128
 "LR": 0.001
 "UPDATE_EPOCHS": 4
 "NUM_MINIBATCHES": 4
 
-REWARD_STANDARDIZATION: True
+"REWARD_STANDARDIZATION": True
 "MAX_GRAD_NORM": 0.5
 "ENT_COEF": 0.0
 "NUM_STEPS": 128
@@ -14,7 +14,7 @@ REWARD_STANDARDIZATION: True
 "VF_COEF": 0.5
 
 "GRU_HIDDEN_DIM": 64
-"FC_DIM_SIZE": 64
+# FC_DIM_SIZE: ~ # embedding size for the GRU, must be same as the GRU hidden size, will be set in the script
 "GAMMA": 0.99
 "ANNEAL_LR": True
 "SCALE_CLIP_EPS": False
@@ -31,7 +31,7 @@ REWARD_STANDARDIZATION: True
 
 # EVALUATION
 "TEST_DURING_TRAINING": True
-"TEST_INTERVAL": 0.1 # as a fraction of updates
+"TEST_INTERVAL": 0.01 # as a fraction of updates
 "TEST_NUM_STEPS": 50
 "TEST_NUM_ENVS": 1_000
 
@@ -40,7 +40,7 @@ REWARD_STANDARDIZATION: True
 ############ global params ############
 
 # experiment params
-"NUM_SEEDS": 2 # number of vmapped seeds
+"NUM_SEEDS": 1 # number of vmapped seeds
 "SEED": 0
 
 "HYP_TUNE": False # perform hyp tune

@@ -24,6 +24,7 @@ from functools import partial
 
 import jaxmarl
 from jaxmarl.wrappers.baselines import LogWrapper, JaxMARLWrapper
+from jaxmarl.wrappers.baselines import save_params
 
 
 class RoadEnvWorldStateWrapper(JaxMARLWrapper):
@@ -69,7 +70,6 @@ class ScannedRNN(nn.Module):
         rnn_state = carry
         ins, resets = x
 
-        # ToDO: Remove after fixing env
         # Ensure inputs are cast to float32
         ins = ins.astype(jnp.float32)
         resets = resets.astype(jnp.float32)
@@ -82,7 +82,6 @@ class ScannedRNN(nn.Module):
 
         new_rnn_state, y = nn.GRUCell(features=ins.shape[1])(rnn_state, ins)
 
-        # ToDO: Remove after fixing env
         # Ensure outputs are cast to float32
         new_rnn_state = new_rnn_state.astype(jnp.float32)
         y = y.astype(jnp.float32)
@@ -180,6 +179,14 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
 
 
 @chex.dataclass
+class EvalMetricsManager:
+    # reported with wandb.log during training
+    logged_eval_metrics: dict
+    # reported with wandb.run.summary at the end of training
+    eval_returns: jnp.ndarray
+
+
+@chex.dataclass
 class RunningStats:
     count: jnp.ndarray  # or float32
     mean: jnp.ndarray
@@ -222,8 +229,8 @@ def make_train(config):
     env = LogWrapper(env)
 
     config["NUM_ACTORS"] = env.num_agents * config["NUM_ENVS"]
-    config["NUM_UPDATES"] = (
-        config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
+    config["TOTAL_TIMESTEPS"] = (
+        config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
     )
     config["MINIBATCH_SIZE"] = (
         config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
@@ -304,6 +311,7 @@ def make_train(config):
             params=critic_network_params,
             tx=critic_tx,
         )
+        train_states = (actor_train_state, critic_train_state)
 
         # INIT ENV
         original_seed = rng[0]
@@ -320,7 +328,7 @@ def make_train(config):
         # TRAIN LOOP
         def _update_step(update_runner_state, unused):
             # COLLECT TRAJECTORIES
-            runner_state, update_steps, eval_metrics = update_runner_state
+            runner_state, update_steps, metrics_manager = update_runner_state
 
             def _env_step(runner_state, unused):
                 (
@@ -622,42 +630,84 @@ def make_train(config):
 
             # UPDATE METRICS
             train_states = update_state[0]
-            metrics = traj_batch.info
-            metrics = jax.tree.map(
-                lambda x: x.reshape(
-                    (config["NUM_STEPS"], config["NUM_ENVS"], env.num_agents)
-                ),
-                traj_batch.info,
-            )
-            metrics["loss"] = loss_info
-            metrics["rnorm_mean"] = rnorm.mean
-            metrics["rnorm_std"] = jnp.sqrt(rnorm.var)
-            metrics["rnorm_count"] = rnorm.count
             rng = update_state[-1]
+            metrics = {
+                "update_steps": update_steps,
+                "env_step": (
+                    (update_steps + 1) * config["NUM_ENVS"] * config["NUM_STEPS"]
+                ),
+                "rnorm_mean": rnorm.mean,
+                "rnorm_std": jnp.sqrt(rnorm.var),
+                "rnorm_count": rnorm.count,
+            }
+            metrics.update(loss_info)
+            log_wrapper_infos = jax.tree.map(
+                lambda x: jnp.nanmean(
+                    jnp.where(
+                        traj_batch.info["returned_episode"],
+                        x,
+                        jnp.nan,
+                    )
+                ),
+                {
+                    "returned_episode": traj_batch.info["returned_episode"],
+                    "returned_episode_lengths": traj_batch.info[
+                        "returned_episode_lengths"
+                    ],
+                    "returned_episode_returns": traj_batch.info[
+                        "returned_episode_returns"
+                    ],
+                },
+            )
+            metrics.update(log_wrapper_infos)
 
             # EVALUATION
             if config.get("TEST_DURING_TRAINING", True):
                 rng, _rng = jax.random.split(rng)
 
                 def eval_and_store_returns(rng, train_states):
-                    val = get_greedy_metrics(rng, train_states)[
-                        "returned_episode_returns"
-                    ]
+                    eval_metrics = get_greedy_metrics(rng, train_states)
                     idx = update_steps // int(
                         config["NUM_UPDATES"] * config["TEST_INTERVAL"]
                     )
-                    return eval_metrics.at[idx].set(val), val
+                    _metrics_manager = EvalMetricsManager(
+                        logged_eval_metrics=eval_metrics,
+                        eval_returns=metrics_manager.eval_returns.at[idx].set(
+                            eval_metrics["returned_episode_returns"]
+                        ),
+                    )
+                    return _metrics_manager
 
-                eval_metrics, eval_return = jax.lax.cond(
+                metrics_manager = jax.lax.cond(
                     update_steps % int(config["NUM_UPDATES"] * config["TEST_INTERVAL"])
                     == 0,
                     lambda _: eval_and_store_returns(_rng, train_states),
-                    lambda _: (eval_metrics, 0.0),
+                    lambda _: metrics_manager,
                     operand=None,
                 )
-                metrics.update({"test_eval_return": eval_return})
+                metrics.update(
+                    {
+                        "test_" + k: v
+                        for k, v in metrics_manager.logged_eval_metrics.items()
+                    }
+                )
 
-            metrics["update_steps"] = update_steps
+            # CHECKPOINTING
+            if config.get("SAVE_PATH", None) is not None:
+
+                jax.lax.cond(
+                    update_steps % int(config["NUM_UPDATES"] * config["TEST_INTERVAL"])
+                    == 0,
+                    lambda _: jax.debug.callback(
+                        checkpoint_model,
+                        original_seed,
+                        train_states,
+                        update_steps,
+                    ),
+                    lambda _: None,
+                    operand=None,
+                )
+
             # report on wandb if required
             if config["WANDB_MODE"] != "disabled":
 
@@ -669,7 +719,14 @@ def make_train(config):
                                 for k, v in metrics.items()
                             }
                         )
-                    wandb.log(metrics)
+                    metrics_conversion = {k: float(v) for k, v in metrics.items()}
+                    try:
+                        metrics_conversion["gpu_stats"] = jax.devices()[
+                            0
+                        ].memory_stats()
+                    except IndexError:
+                        pass
+                    wandb.log(metrics_conversion, step=metrics["update_steps"])
 
                 jax.debug.callback(callback, metrics, original_seed)
 
@@ -683,7 +740,7 @@ def make_train(config):
                 rnorm,
                 rng,
             )
-            return (runner_state, update_steps, eval_metrics), metrics
+            return (runner_state, update_steps, metrics_manager), metrics
 
         def get_greedy_metrics(rng, train_states):
             """Help function to test greedy policy during training"""
@@ -758,16 +815,38 @@ def make_train(config):
             )
             return metrics
 
+        def checkpoint_model(vmapped_seed, train_states, step):
+
+            alg_name = config["ALG_NAME"]
+            map_name = config["ENV_KWARGS"]["map_name"]
+            actor_state, critic_state = train_states
+            save_dir = os.path.join(
+                config["SAVE_PATH"], alg_name, map_name, wandb.run.id, str(vmapped_seed)
+            )
+            os.makedirs(save_dir, exist_ok=True)
+            OmegaConf.save(config, os.path.join(save_dir, f"config.yaml"))
+
+            actor_params = jax.tree.map(lambda x: x, actor_state.params)
+            save_path = os.path.join(save_dir, f"actor_{step}.safetensors")
+            save_params(actor_params, save_path)
+
+            critic_params = jax.tree.map(lambda x: x, critic_state.params)
+            save_path = os.path.join(save_dir, f"critic_{step}.safetensors")
+            save_params(critic_params, save_path)
+
         rng, _rng = jax.random.split(rng)
 
-        # Storing evaluation metrics on CPU to save GPU memory
+        # Metrics Manager
         num_evals = int(1 / config["TEST_INTERVAL"])
-        initial_eval_metrics = jnp.zeros((num_evals,), device="cpu")
+        metrics_manager = EvalMetricsManager(
+            logged_eval_metrics=get_greedy_metrics(_rng, train_states),
+            eval_returns=jnp.zeros((num_evals,), device="cpu"),
+        )
 
         # train
         rng, _rng = jax.random.split(rng)
         runner_state = (
-            (actor_train_state, critic_train_state),
+            train_states,
             env_state,
             obsv,
             jnp.zeros((config["NUM_ACTORS"]), dtype=bool),
@@ -777,7 +856,7 @@ def make_train(config):
         )
         runner_state, metrics = jax.lax.scan(
             _update_step,
-            (runner_state, 0, initial_eval_metrics),
+            (runner_state, 0, metrics_manager),
             None,
             config["NUM_UPDATES"],
         )
@@ -788,85 +867,56 @@ def make_train(config):
 
 def single_run(config):
 
-    num_seeds = config["NUM_SEEDS"]
-    alg_name = config["ALG_NAME"]
-    map_name = config["ENV_KWARGS"]["map_name"]
+    alg_name = config.get("ALG_NAME", "mappo_rnn")
+
+    env_name = config.get("env_name", "default")
+    map_name = config["ENV_KWARGS"].get("map_name", "default")
+
+    wandb.init(
+        entity=config["ENTITY"],
+        project=f"{config['PROJECT']}_{map_name}",
+        tags=[
+            alg_name.upper(),
+            f"jax_{jax.__version__}",
+        ],
+        config=config,
+        mode=config["WANDB_MODE"],
+    )
+
+    # update the default params in case of overriding
+    for k, v in dict(wandb.config).items():
+        config[k] = v
+
+    # embedding size for the GRU, must be same as the GRU hidden size
+    config["FC_DIM_SIZE"] = config["GRU_HIDDEN_DIM"]
+    config["TOTAL_TIMESTEPS"] = (
+        config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
+    )
 
     if config["SEED"] == "random":
         config["SEED"] = np.random.randint(0, 2**32 - 1)
 
-    wandb.init(
-        entity=config["ENTITY"],
-        project=config["PROJECT"],
-        tags=["MAPPO", "RNN", map_name],
-        config=config,
-        mode=config["WANDB_MODE"],
-    )
+    wandb.run.name = f"{alg_name}_{env_name}_{map_name}_{config['SEED']}"
+    wandb.run.save()
+    wandb.config.update(config, allow_val_change=True)
+
+    print("Config:\n", OmegaConf.to_yaml(config))
 
     rng = jax.random.PRNGKey(config["SEED"])
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
     train_vjit = jax.jit(jax.vmap(make_train(config)))
     outs = jax.block_until_ready(train_vjit(rngs))
 
-    # shape: (num_seeds, num_evals)
-    test_returns = outs["runner_state"][-1] / 1e6
-    num_seeds, num_evals = test_returns.shape
-
-    # Aggregate test returns
-    test_returns_mean = jnp.mean(test_returns, axis=0)
-    test_returns_std = jnp.std(test_returns, axis=0)
-    test_returns_max = jnp.max(test_returns, axis=1)
-
-    ## Printing results
-    print(f"Max returns (over all seeds): {max(test_returns_max):.2f}")
-    for i in range(num_seeds):
-        print(f"Seed {i}: {test_returns_max[i]:.2f}")
-
-    ## Plotting
-    import matplotlib.pyplot as plt
-
-    plt.plot(test_returns_mean)
-    plt.fill_between(
-        np.arange(num_evals),
-        test_returns_mean - test_returns_std,
-        test_returns_mean + test_returns_std,
-        alpha=0.2,
-    )
-    plt.xlabel("Eval Chckpts")
-    plt.ylabel("Returns")
-    plt.title(f"Runs ({num_seeds}) | {alg_name} on {map_name}")
-    plt.savefig("mappo_rnn_road_env.png", dpi=300)
-    plt.show()
-
-    # save model params
-    if config.get("SAVE_PATH", None) is not None:
-        from jaxmarl.wrappers.baselines import save_params
-
-        env_name = config["ENV_NAME"]
-        alg_name = config["ALG_NAME"]
-        model_state = outs["runner_state"][0]
-        save_dir = os.path.join(config["SAVE_PATH"], env_name)
-        os.makedirs(save_dir, exist_ok=True)
-        OmegaConf.save(
-            config,
-            os.path.join(
-                save_dir, f'{alg_name}_{env_name}_seed{config["SEED"]}_config.yaml'
-            ),
-        )
-
-        for i, rng in enumerate(rngs):
-            params = jax.tree.map(lambda x: x[i], model_state.params)
-            save_path = os.path.join(
-                save_dir,
-                f'{alg_name}_{env_name}_seed{config["SEED"]}_vmap{i}.safetensors',
-            )
-            save_params(params, save_path)
+    # wandb summary
+    metrics_manager = outs["runner_state"][-1]
+    wandb.run.summary["eval_returns"] = list(metrics_manager.eval_returns)
 
 
 def tune(default_config):
     """Hyperparameter sweep with wandb."""
 
     alg_name = default_config["ALG_NAME"]
+    env_name = default_config["ENV_NAME"]
     map_name = default_config["ENV_KWARGS"]["map_name"]
 
     def wrapped_make_train():
@@ -877,13 +927,21 @@ def tune(default_config):
         for k, v in dict(wandb.config).items():
             config[k] = v
 
+        # embedding size for the GRU, must be same as the GRU hidden size
+        config["FC_HIDDEN_DIM"] = config["GRU_HIDDEN_DIM"]
+        config["TOTAL_TIMESTEPS"] = (
+            config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
+        )
+
         if config["SEED"] == "random":
             seed = np.random.randint(0, 2**32 - 1)
             config["SAMPLED_SEED"] = seed
         else:
             seed = config["SEED"]
 
-        config["FC_DIM_SIZE"] = config["GRU_HIDDEN_DIM"]
+        wandb.config.update(config)
+
+        print("running experiment with params:", config)
 
         rng = jax.random.PRNGKey(seed)
         rngs = jax.random.split(rng, config["NUM_SEEDS"])
@@ -891,7 +949,7 @@ def tune(default_config):
         outs = jax.block_until_ready(train_vjit(rngs))
 
     sweep_config = {
-        "name": f"{alg_name}_{map_name}",
+        "name": f"{alg_name}_{env_name}_{map_name}",
         "method": "grid",
         "metric": {
             "name": "test_eval_return",
@@ -919,7 +977,6 @@ def tune(default_config):
 def main(config):
 
     config = OmegaConf.to_container(config)
-    print("Config:\n", OmegaConf.to_yaml(config))
 
     if config.get("DOUBLE_PRECISION_MODE", False):
         jax.config.update("jax_enable_x64", True)
@@ -932,3 +989,29 @@ def main(config):
 
 if __name__ == "__main__":
     main()
+
+
+def load_checkpoint_agent(checkpoint_path, checkpoint_id):
+    from jaxmarl.wrappers.baselines import load_params
+
+    # load YAML
+    config = OmegaConf.load(os.path.join(checkpoint_path, "config.yaml"))
+    config = OmegaConf.to_container(config)
+
+    env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
+    env = RoadEnvWorldStateWrapper(env)
+    env = LogWrapper(env)
+
+    actor_network = ActorRNN(env.action_space(env.agents[0]).n, config=config)
+    critic_network = CriticRNN(config=config)
+
+    actor_params = load_params(
+        os.path.join(checkpoint_path, f"actor_{checkpoint_id}.safetensors")
+    )
+    critic_params = load_params(
+        os.path.join(checkpoint_path, f"critic_{checkpoint_id}.safetensors")
+    )
+    actor_network_params = jax.tree.map(lambda x: x, actor_params)
+    critic_network_params = jax.tree.map(lambda x: x, critic_params)
+
+    return actor_network, critic_network, actor_network_params, critic_network_params
