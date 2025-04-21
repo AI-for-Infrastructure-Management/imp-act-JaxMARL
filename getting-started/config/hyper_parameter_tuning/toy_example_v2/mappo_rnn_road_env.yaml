@@ -4,7 +4,7 @@
 "UPDATE_EPOCHS": 4
 "NUM_MINIBATCHES": 4
 
-REWARD_STANDARDIZATION: True
+"REWARD_STANDARDIZATION": True
 "MAX_GRAD_NORM": 0.5
 "ENT_COEF": 0.0
 "NUM_STEPS": 128
@@ -52,7 +52,7 @@ REWARD_STANDARDIZATION: True
 "WANDB_LOG_ALL_SEEDS": False # will log vmapped seeds separately
 
 # where to save the params (if None, will not save)
-SAVE_PATH: null
+"SAVE_PATH": null
 
 # precision
 "DOUBLE_PRECISION_MODE": False # use double precision for the environment
