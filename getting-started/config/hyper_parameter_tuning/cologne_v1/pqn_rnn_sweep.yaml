@@ -2,7 +2,7 @@ command:
   - ${env}
   - python
   - ${program}
-  - --config-path=./config/hyper_parameter_tuning/cologne-v1
+  - --config-path=./config/hyper_parameter_tuning/cologne_v1
 entity: imp-act
 method: random
 metric:
