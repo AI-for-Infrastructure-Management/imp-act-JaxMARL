@@ -42,7 +42,6 @@ class ScannedRNN(nn.Module):
         rnn_state = carry
         ins, resets = x
 
-        # ToDO: Remove after fixing env
         # Ensure inputs are cast to float32
         ins = ins.astype(jnp.float32)
         resets = resets.astype(jnp.float32)
@@ -54,7 +53,6 @@ class ScannedRNN(nn.Module):
         )
         new_rnn_state, y = nn.GRUCell(features=ins.shape[1])(rnn_state, ins)
 
-        # ToDO: Remove after fixing env
         # Ensure inputs are cast to float32
         new_rnn_state = new_rnn_state.astype(jnp.float32)
         y = y.astype(jnp.float32)
