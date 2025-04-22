@@ -68,13 +68,13 @@ parameters:
           segment_lengths: true
           volumes: true
           capacity: false
-        map_name: Cologne-v1
+        map_name: CologneBonnDusseldorf-v1
       - encoding_type: none
         include_extra_observations:
           segment_lengths: true
           volumes: true
           capacity: false
-        map_name: Cologne-v1
+        map_name: CologneBonnDusseldorf-v1
 
 program: getting-started/qmix_rnn_road_env.py
-project: jaxMARL-Cologne-v1
+project: jaxMARL-CologneBonnDusseldorf-v1
