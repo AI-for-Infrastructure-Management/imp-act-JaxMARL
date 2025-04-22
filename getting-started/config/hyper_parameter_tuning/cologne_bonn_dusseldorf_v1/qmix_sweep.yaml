@@ -20,7 +20,7 @@ parameters:
   BUFFER_SIZE:
     value: 5000
   BUFFER_BATCH_SIZE:
-    value: 64
+    value: 16
   HIDDEN_SIZE:
     value: 512
   MAX_GRAD_NORM:
@@ -30,11 +30,11 @@ parameters:
   TAU:
     value: 1
   NUM_EPOCHS:
-    value: 4
+    value: 8
   LR:
-    values: [0.0001, 0.0005]
+    values: [0.0002, 0.0001, 0.00005]
   LEARNING_STARTS:
-    value: 10000
+    value: 512
   LR_LINEAR_DECAY:
     value: False
   GAMMA:
@@ -44,15 +44,15 @@ parameters:
   EPS_START:
     value: 1
   EPS_FINISH:
-    values: [0, 0.001]
+    value: 0
   EPS_DECAY:
     value: 0.2
 
   # --- Mixer Specific ---
   MIXER_EMBEDDING_DIM:
-    values: [32, 64]
+    value: 64
   MIXER_HYPERNET_HIDDEN_DIM:
-    values: [128, 256]
+    value: 128
   MIXER_INIT_SCALE:
     value: 0.001
 

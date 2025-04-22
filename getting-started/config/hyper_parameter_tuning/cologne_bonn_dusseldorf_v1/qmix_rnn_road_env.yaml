@@ -2,7 +2,7 @@
 "NUM_ENVS": 32
 "NUM_STEPS": 51
 "BUFFER_SIZE": 5e3
-"BUFFER_BATCH_SIZE": 64
+"BUFFER_BATCH_SIZE": 16
 "HIDDEN_SIZE": 512
 "EPS_START": 1.0
 "EPS_FINISH": 0.001
@@ -12,7 +12,7 @@
 "TAU": 1
 "NUM_EPOCHS": 8
 "LR": 1e-4
-"LEARNING_STARTS": 10_000 # timesteps
+"LEARNING_STARTS": 512 # timesteps
 "LR_LINEAR_DECAY": False
 "GAMMA": 0.99
 "MIXER_EMBEDDING_DIM": 64
@@ -23,7 +23,7 @@
 "ENV_NAME": "road_env"
 "ENV_KWARGS":
   "map_name": "CologneBonnDusseldorf-v1"
-  "encoding_type": "binary"       # can be binary, one-hot, sinusoidal or none
+  "encoding_type": "none"       # can be binary, one-hot, sinusoidal or none
   "include_extra_observations": 
     "segment_lengths": True     # Length of the segments
     "volumes": True             # Volumes of the vehicles on the segment normalized by the segment capacity
