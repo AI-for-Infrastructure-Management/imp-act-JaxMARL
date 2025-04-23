@@ -9,7 +9,7 @@ plot_histogram: True
 double_precision_mode: False
 
 env_kwargs:
-  "map_name": "ToyExample-v1"   # Options: ToyExample-v2, Cologne-v1, CologneBonnDusseldorf-v1
+  "map_name": "ToyExample-v2"   # Options: ToyExample-v2, Cologne-v1, CologneBonnDusseldorf-v1
   "encoding_type": "none"       # can be binary, one-hot, sinusoidal or none
   "include_extra_observations": 
     "segment_lengths": True     # Length of the segments
