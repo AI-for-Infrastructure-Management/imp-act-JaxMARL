@@ -27,7 +27,7 @@ def get_policy_do_nothing(params=None):
     """
     def policy(key, state, obs):
         """Policy that does nothing."""
-        return {agent: 0 for agent in obs.keys()}
+        return {agent: 0 for agent in obs.bs.keys()}
     return policy
 
 def get_policy_random(params=None):
@@ -106,7 +106,7 @@ def main(cfg: DictConfig):
         log.info("Using double precision mode")
 
     #### Inputs
-    MAP_NAME = cfg.map
+    env_kwargs = cfg.env_kwargs
     policy_name = cfg.policy
     
     # Get policy with parameters
@@ -123,7 +123,7 @@ def main(cfg: DictConfig):
     key = jax.random.PRNGKey(0)
     key, key_rollout = jax.random.split(key)
     # Initialise environment.
-    env = make('road_env', map_name=MAP_NAME)
+    env = make('road_env', **env_kwargs)
     env = LogWrapper(env)
 
     jit_vmap_rollout = jax.jit(

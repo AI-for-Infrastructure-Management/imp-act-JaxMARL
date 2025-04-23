@@ -103,7 +103,7 @@ def main(cfg: DictConfig):
         log.info("Using double precision mode")
 
     # Extract configuration
-    MAP_NAME = cfg.map
+    ENV_KWARGS = cfg.env_kwargs
     NUM_EPISODES = cfg.num_episodes
     NUM_STEPS = cfg.num_steps
     NORM_CONSTANT = cfg.norm_constant
@@ -136,7 +136,7 @@ def main(cfg: DictConfig):
     # combo_keys = jnp.repeat(jnp.expand_dims(key, 0), num_combos, axis=0)
     # all_keys = jax.vmap(lambda ck: jax.random.split(ck, NUM_EPISODES))(combo_keys)
 
-    env = make('road_env', map_name=MAP_NAME)
+    env = make('road_env', **ENV_KWARGS)
     env = LogWrapper(env)
 
     # We'll define a function that, for one combo, runs all episodes with vmap.

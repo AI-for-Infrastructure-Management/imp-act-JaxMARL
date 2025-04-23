@@ -1,4 +1,3 @@
-map: ToyExample-v2  # Options: ToyExample-v2, Cologne-v1, CologneBonnDusseldorf-v1
 policy: random  # Options: do_nothing, random, humble_heuristic
 policy_params:
   inspection_interval: 6  # Every n timesteps the policy will perform inspection (action 1)
@@ -8,3 +7,10 @@ num_steps: 50
 norm_constant: 1e6
 plot_histogram: True
 double_precision_mode: False
+"env_kwargs":
+  "map_name": "ToyExample-v1"      # Options: ToyExample-v2, Cologne-v1, CologneBonnDusseldorf-v1
+  "encoding_type": "none"       # can be binary, one-hot, sinusoidal or none
+  "include_extra_observations": 
+    "segment_lengths": True     # Length of the segments
+    "volumes": True             # Volumes of the vehicles on the segment normalized by the segment capacity
+    "capacity": False           # Capacity of the segments
