@@ -723,7 +723,7 @@ def make_train(config, env):
 
         def checkpoint_model(vmapped_seed, train_state, step):
             save_dir = os.path.join(
-                hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
+                config["HYDRA_PATH"] ,
                 'checkpoints',
                 str(vmapped_seed)
             )
@@ -763,6 +763,8 @@ def single_run(config):
     alg_name = config.get("ALG_NAME", "qmix_rnn")
 
     map_name = config["ENV_KWARGS"].get("map_name", "default")
+
+    config["HYDRA_PATH"] = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
     
     wandb.init(
         entity=config["ENTITY"],
@@ -804,7 +806,7 @@ def single_run(config):
     OmegaConf.save(
         config,
         os.path.join(
-            hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
+            config["HYDRA_PATH"] ,
             'config.yaml'
         ),
     )
@@ -819,7 +821,7 @@ def single_run(config):
     if config.get("SAVE_CHECKPOINTS", False):
         model_state = outs["runner_state"][0]
         save_dir = os.path.join(
-            hydra.core.hydra_config.HydraConfig.get().runtime.output_dir,
+            config["HYDRA_PATH"],
             'checkpoints')
         os.makedirs(save_dir, exist_ok=True)
 
