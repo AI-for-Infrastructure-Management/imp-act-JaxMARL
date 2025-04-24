@@ -675,7 +675,6 @@ def single_run(config):
     map_name = config["ENV_KWARGS"].get("map_name", "default")
 
     wandb.run.name = f"{alg_name}_{env_name}_{map_name}_{config['SEED']}"
-    wandb.run.save()
     wandb.config.update(config, allow_val_change=True)
 
     print("Config:\n", OmegaConf.to_yaml(config))
