@@ -50,8 +50,14 @@
 "WANDB_MODE": "online"
 "WANDB_LOG_ALL_SEEDS": False # will log separately the vmapped seeds
 
-# where to save the params (if None, will not save)
-"SAVE_PATH": null
+# checkpointing
+"SAVE_CHECKPOINTS": True # save checkpoints
+"SAVE_CHECKPOINTS_INTERVAL": 0.5 # as a fraction of updates. Tipp: set to same value or fraction of TEST_INTERVAL.
 
 # precision
 "DOUBLE_PRECISION_MODE": False # use double precision for the environment
+
+# hydra params
+hydra:
+  run:
+    dir: outputs/${ENV_KWARGS.map_name}/${ALG_NAME}/${now:%Y-%m-%d_%H-%M-%S.%f}
