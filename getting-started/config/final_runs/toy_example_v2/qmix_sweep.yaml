@@ -1,0 +1,27 @@
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --config-path=./config/final_runs/toy_example_v2
+entity: imp-act
+method: grid
+metric:
+  goal: maximize
+  name: test_returned_episode_returns
+name: qmix_rnn_final_run
+parameters:
+  SEED:
+    values:
+      - 2849413441
+      - 1696433054
+      - 3346946419
+      - 3076387228
+      - 1975447076
+      - 2982199793
+      - 1363760044
+      - 3057989503
+      - 3530972771
+      - 4165291849
+
+program: getting-started/qmix_rnn_road_env.py
+project: jaxMARL-ToyExample-v2-final
