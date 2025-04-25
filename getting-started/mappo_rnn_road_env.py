@@ -5,6 +5,7 @@ Adapted from: baselines/MAPPO/mappo_rnn_smax.py
 """
 
 import os
+import logging
 import copy
 import jax
 import chex
@@ -23,8 +24,10 @@ from omegaconf import OmegaConf
 from functools import partial
 
 import jaxmarl
-from jaxmarl.wrappers.baselines import LogWrapper, JaxMARLWrapper
-from jaxmarl.wrappers.baselines import save_params
+from jaxmarl.wrappers.baselines import LogWrapper, JaxMARLWrapper, save_params
+
+# Get Hydra's logger
+log = logging.getLogger(__name__)
 
 
 class RoadEnvWorldStateWrapper(JaxMARLWrapper):
@@ -250,6 +253,9 @@ def make_train(config):
         return config["LR"] * frac
 
     def train(rng):
+
+        original_seed = rng[0]
+
         # INIT NETWORK
         actor_network = ActorRNN(env.action_space(env.agents[0]).n, config=config)
         critic_network = CriticRNN(config=config)
@@ -314,7 +320,6 @@ def make_train(config):
         train_states = (actor_train_state, critic_train_state)
 
         # INIT ENV
-        original_seed = rng[0]
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
         obsv, env_state = jax.vmap(env.reset, in_axes=(0,))(reset_rng)
@@ -693,10 +698,11 @@ def make_train(config):
                 )
 
             # CHECKPOINTING
-            if config.get("SAVE_PATH", None) is not None:
+            if config.get("SAVE_CHECKPOINTS", False):
 
                 jax.lax.cond(
-                    update_steps % int(config["NUM_UPDATES"] * config["TEST_INTERVAL"])
+                    update_steps
+                    % int(config["NUM_UPDATES"] * config["SAVE_CHECKPOINTS_INTERVAL"])
                     == 0,
                     lambda _: jax.debug.callback(
                         checkpoint_model,
@@ -817,22 +823,25 @@ def make_train(config):
 
         def checkpoint_model(vmapped_seed, train_states, step):
 
-            alg_name = config["ALG_NAME"]
-            map_name = config["ENV_KWARGS"]["map_name"]
-            actor_state, critic_state = train_states
             save_dir = os.path.join(
-                config["SAVE_PATH"], alg_name, map_name, wandb.run.id, str(vmapped_seed)
+                config["HYDRA_PATH"],
+                "checkpoints",
+                str(vmapped_seed),
             )
             os.makedirs(save_dir, exist_ok=True)
-            OmegaConf.save(config, os.path.join(save_dir, f"config.yaml"))
 
-            actor_params = jax.tree.map(lambda x: x, actor_state.params)
-            save_path = os.path.join(save_dir, f"actor_{step}.safetensors")
-            save_params(actor_params, save_path)
+            update_step_length = int(np.ceil(np.log10(config["NUM_UPDATES"])))
 
-            critic_params = jax.tree.map(lambda x: x, critic_state.params)
-            save_path = os.path.join(save_dir, f"critic_{step}.safetensors")
-            save_params(critic_params, save_path)
+            actor_state, critic_state = train_states
+
+            for name, state in [("actor", actor_state), ("critic", critic_state)]:
+                params = jax.tree.map(lambda x: x, state.params)
+                save_path = os.path.join(
+                    save_dir,
+                    f"checkpoint_{name}_{step:0{update_step_length}}.safetensors",
+                )
+                log.info(f"Saving checkpoint {save_path}")
+                save_params(params, save_path)
 
         rng, _rng = jax.random.split(rng)
 
@@ -872,6 +881,8 @@ def single_run(config):
     env_name = config.get("env_name", "default")
     map_name = config["ENV_KWARGS"].get("map_name", "default")
 
+    config["HYDRA_PATH"] = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
+
     wandb.init(
         entity=config["ENTITY"],
         project=f"{config['PROJECT']}_{map_name}",
@@ -901,6 +912,13 @@ def single_run(config):
 
     print("Config:\n", OmegaConf.to_yaml(config))
 
+    # Save actual config
+    config["WANDB_RUN_ID"] = wandb.run.id
+    config["WANDB_RUN_URL"] = wandb.run.get_url()
+    config["WANDB_RUN_NAME"] = wandb.run.name
+
+    OmegaConf.save(config, os.path.join(config["HYDRA_PATH"], "config.yaml"))
+
     rng = jax.random.PRNGKey(config["SEED"])
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
     train_vjit = jax.jit(jax.vmap(make_train(config)))
@@ -909,6 +927,28 @@ def single_run(config):
     # wandb summary
     metrics_manager = outs["runner_state"][-1]
     wandb.run.summary["eval_returns"] = list(metrics_manager.eval_returns)
+
+    # save params
+    if config.get("SAVE_CHECKPOINTS", False):
+
+        actor_state, critic_state = outs["runner_state"][0][0]
+        save_dir = os.path.join(config["HYDRA_PATH"], "checkpoints")
+        os.makedirs(save_dir, exist_ok=True)
+
+        for s in range(config["NUM_SEEDS"]):
+            for name, params in [
+                ("actor", actor_state.params),
+                ("critic", critic_state.params),
+            ]:
+                final_params = jax.tree.map(lambda x: x[s], params)
+                save_path = os.path.join(
+                    save_dir,
+                    str(rngs[s][0].item()),
+                    f"checkpoint_{name}_final.safetensors",
+                )
+                os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                log.info(f"Saving final checkpoint {save_path}")
+                save_params(final_params, save_path)
 
 
 def tune(default_config):
@@ -990,11 +1030,11 @@ if __name__ == "__main__":
     main()
 
 
-def load_checkpoint_agent(checkpoint_path, checkpoint_id):
+def load_checkpoint_agent(hydra_path, rng, checkpoint_id):
     from jaxmarl.wrappers.baselines import load_params
 
     # load YAML
-    config = OmegaConf.load(os.path.join(checkpoint_path, "config.yaml"))
+    config = OmegaConf.load(os.path.join(hydra_path, "config.yaml"))
     config = OmegaConf.to_container(config)
 
     env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
@@ -1005,10 +1045,20 @@ def load_checkpoint_agent(checkpoint_path, checkpoint_id):
     critic_network = CriticRNN(config=config)
 
     actor_params = load_params(
-        os.path.join(checkpoint_path, f"actor_{checkpoint_id}.safetensors")
+        os.path.join(
+            hydra_path,
+            "checkpoints",
+            str(rng),
+            f"checkpoint_actor_{str(checkpoint_id)}.safetensors",
+        )
     )
     critic_params = load_params(
-        os.path.join(checkpoint_path, f"critic_{checkpoint_id}.safetensors")
+        os.path.join(
+            hydra_path,
+            "checkpoints",
+            str(rng),
+            f"checkpoint_critic_{str(checkpoint_id)}.safetensors",
+        )
     )
     actor_network_params = jax.tree.map(lambda x: x, actor_params)
     critic_network_params = jax.tree.map(lambda x: x, critic_params)
