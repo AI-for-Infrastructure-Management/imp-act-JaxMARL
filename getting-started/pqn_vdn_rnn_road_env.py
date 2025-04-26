@@ -626,7 +626,6 @@ def make_train(config, env):
                 "params": params,
                 "batch_stats": train_state.batch_stats,
             }
-            jax.debug.breakpoint()
 
             log.info(f"Saving checkpoint {save_path}")
             save_params(params_to_save, save_path)
