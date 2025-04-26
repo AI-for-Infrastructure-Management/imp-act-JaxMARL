@@ -6,7 +6,7 @@
 "HIDDEN_SIZE": 256
 "EPS_START": 1.0
 "EPS_FINISH": 0.001
-"EPS_DECAY": 0.1 # ratio of updates
+"EPS_DECAY": 0.05 # ratio of updates
 "MAX_GRAD_NORM": 12.5
 "TARGET_UPDATE_INTERVAL": 32
 "TAU": 1
