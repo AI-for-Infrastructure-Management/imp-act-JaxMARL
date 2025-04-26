@@ -709,6 +709,7 @@ def make_train(config):
                         original_seed,
                         train_states,
                         update_steps,
+                        rnorm,
                     ),
                     lambda _: None,
                     operand=None,
@@ -821,7 +822,7 @@ def make_train(config):
             )
             return metrics
 
-        def checkpoint_model(vmapped_seed, train_states, step):
+        def checkpoint_model(vmapped_seed, train_states, step, rnorm):
 
             save_dir = os.path.join(
                 config["HYDRA_PATH"],
@@ -832,16 +833,28 @@ def make_train(config):
 
             update_step_length = int(np.ceil(np.log10(config["NUM_UPDATES"])))
 
+            save_path = os.path.join(
+                save_dir, f"checkpoint_{step:0{update_step_length}}.safetensors"
+            )
+
             actor_state, critic_state = train_states
 
-            for name, state in [("actor", actor_state), ("critic", critic_state)]:
-                params = jax.tree.map(lambda x: x, state.params)
-                save_path = os.path.join(
-                    save_dir,
-                    f"checkpoint_{name}_{step:0{update_step_length}}.safetensors",
-                )
-                log.info(f"Saving checkpoint {save_path}")
-                save_params(params, save_path)
+            metadata = {
+                "rnorm": {
+                    "mean": rnorm.mean.item(),
+                    "var": rnorm.var.item(),
+                    "count": rnorm.count.item(),
+                }
+            }
+
+            params_to_save = {
+                "actor_params": actor_state.params,
+                "critic_params": critic_state.params,
+                "metadata": metadata,
+            }
+
+            log.info(f"Saving checkpoint {save_path}")
+            save_params(params_to_save, save_path)
 
         rng, _rng = jax.random.split(rng)
 
@@ -928,28 +941,6 @@ def single_run(config):
     metrics_manager = outs["runner_state"][-1]
     wandb.run.summary["eval_returns"] = list(metrics_manager.eval_returns)
 
-    # save params
-    if config.get("SAVE_CHECKPOINTS", False):
-
-        actor_state, critic_state = outs["runner_state"][0][0]
-        save_dir = os.path.join(config["HYDRA_PATH"], "checkpoints")
-        os.makedirs(save_dir, exist_ok=True)
-
-        for s in range(config["NUM_SEEDS"]):
-            for name, params in [
-                ("actor", actor_state.params),
-                ("critic", critic_state.params),
-            ]:
-                final_params = jax.tree.map(lambda x: x[s], params)
-                save_path = os.path.join(
-                    save_dir,
-                    str(rngs[s][0].item()),
-                    f"checkpoint_{name}_final.safetensors",
-                )
-                os.makedirs(os.path.dirname(save_path), exist_ok=True)
-                log.info(f"Saving final checkpoint {save_path}")
-                save_params(final_params, save_path)
-
 
 def tune(default_config):
     """Hyperparameter sweep with wandb."""
@@ -1028,39 +1019,3 @@ def main(config):
 
 if __name__ == "__main__":
     main()
-
-
-def load_checkpoint_agent(hydra_path, rng, checkpoint_id):
-    from jaxmarl.wrappers.baselines import load_params
-
-    # load YAML
-    config = OmegaConf.load(os.path.join(hydra_path, "config.yaml"))
-    config = OmegaConf.to_container(config)
-
-    env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
-    env = RoadEnvWorldStateWrapper(env)
-    env = LogWrapper(env)
-
-    actor_network = ActorRNN(env.action_space(env.agents[0]).n, config=config)
-    critic_network = CriticRNN(config=config)
-
-    actor_params = load_params(
-        os.path.join(
-            hydra_path,
-            "checkpoints",
-            str(rng),
-            f"checkpoint_actor_{str(checkpoint_id)}.safetensors",
-        )
-    )
-    critic_params = load_params(
-        os.path.join(
-            hydra_path,
-            "checkpoints",
-            str(rng),
-            f"checkpoint_critic_{str(checkpoint_id)}.safetensors",
-        )
-    )
-    actor_network_params = jax.tree.map(lambda x: x, actor_params)
-    critic_network_params = jax.tree.map(lambda x: x, critic_params)
-
-    return actor_network, critic_network, actor_network_params, critic_network_params
