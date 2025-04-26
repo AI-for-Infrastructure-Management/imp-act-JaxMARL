@@ -621,8 +621,15 @@ def make_train(config, env):
             save_path = os.path.join(save_dir,f'checkpoint_{step:0{update_step_length}}.safetensors')
 
             params = train_state.params
+
+            params_to_save = {
+                "params": params,
+                "batch_stats": train_state.batch_stats,
+            }
+            jax.debug.breakpoint()
+
             log.info(f"Saving checkpoint {save_path}")
-            save_params(params, save_path)
+            save_params(params_to_save, save_path)
 
         rng, _rng = jax.random.split(rng)
         test_state = get_greedy_metrics(_rng, train_state)
@@ -762,25 +769,6 @@ def single_run(config):
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
     train_vjit = jax.jit(jax.vmap(make_train(config, env)))
     outs = jax.block_until_ready(train_vjit(rngs))
-
-    # save params
-    if config.get("SAVE_CHECKPOINTS", False):
-        model_state = outs["runner_state"][0]
-        save_dir = os.path.join(
-            config["HYDRA_PATH"],
-            'checkpoints')
-        os.makedirs(save_dir, exist_ok=True)
-
-        for i, rng in enumerate(rngs):
-            params = jax.tree.map(lambda x: x[i], model_state.params)
-            save_path = os.path.join(
-                save_dir,
-                str(rngs[i][0].item()),
-                f'checkpoint_final.safetensors',
-            )
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            log.info(f"Saving final checkpoint {save_path}")
-            save_params(params, save_path)
 
 
 def tune(default_config):
