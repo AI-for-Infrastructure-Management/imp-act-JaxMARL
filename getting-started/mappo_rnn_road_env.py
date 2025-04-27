@@ -793,6 +793,7 @@ def make_train(config):
                 step_state = (train_states, env_state, obsv, done_batch, ac_hstate, rng)
                 return step_state, (rewards, dones, infos)
 
+            rng, _rng = jax.random.split(rng)
             reset_rng = jax.random.split(_rng, config["TEST_NUM_ENVS"])
             init_obs, env_state = jax.vmap(env.reset, in_axes=(0,))(reset_rng)
             ac_init_hstate = ScannedRNN.initialize_carry(
