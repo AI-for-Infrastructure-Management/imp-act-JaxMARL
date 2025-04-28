@@ -26,7 +26,7 @@
     "volumes": True             # Volumes of the vehicles on the segment normalized by the segment capacity
     "capacity": False           # Capacity of the segments
 
-"REW_SCALE": 1e-8 # Note: Update info used 1.0e-08, keeping original format 1e-8
+"REW_SCALE": 1e-8
 
 # evaluate
 "TEST_DURING_TRAINING": True
