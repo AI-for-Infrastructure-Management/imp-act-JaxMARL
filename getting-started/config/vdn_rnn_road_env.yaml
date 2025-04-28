@@ -19,7 +19,7 @@
 # ENV
 "ENV_NAME": "road_env"
 "ENV_KWARGS":
-  "map_name": "Cologne-v1"
+  "map_name": "ToyExample-v2"
   "encoding_type": "binary"     # can be binary, one-hot, sinusoidal or none
   "include_extra_observations": 
     "segment_lengths": True     # Length of the segments
@@ -52,7 +52,7 @@
 
 # checkpointing
 "SAVE_CHECKPOINTS": True # save checkpoints
-"SAVE_CHECKPOINTS_INTERVAL": 0.5 # as a fraction of updates. Tipp: set to same value or fraction of TEST_INTERVAL.
+"SAVE_CHECKPOINTS_INTERVAL": 0.01 # as a fraction of updates. Tipp: set to same value or fraction of TEST_INTERVAL.
 
 # precision
 "DOUBLE_PRECISION_MODE": False # use double precision for the environment

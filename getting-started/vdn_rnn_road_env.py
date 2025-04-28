@@ -193,9 +193,9 @@ def make_train(config, env):
         # INIT ENV
         original_seed = rng[0]
         rng, _rng = jax.random.split(rng)
-        wrapped_env = CTRolloutManager(env, batch_size=config["NUM_ENVS"])
+        wrapped_env = CTRolloutManager(env, batch_size=config["NUM_ENVS"], preprocess_obs=False)
         test_env = CTRolloutManager(
-            env, batch_size=config["TEST_NUM_ENVS"]
+            env, batch_size=config["TEST_NUM_ENVS"], preprocess_obs=False
         )  # batched env for testing (has different batch size)
 
         # INIT NETWORK AND OPTIMIZER
@@ -560,6 +560,7 @@ def make_train(config, env):
                         original_seed,
                         train_state,
                         train_state.n_updates,
+                        rnorm,
                     ),
                     lambda _: None,
                     operand=None,
@@ -637,7 +638,7 @@ def make_train(config, env):
 
             return metrics
 
-        def checkpoint_model(vmapped_seed, train_state, step):
+        def checkpoint_model(vmapped_seed, train_state, step, rnorm):
             save_dir = os.path.join(
                 config["HYDRA_PATH"],
                 'checkpoints',
@@ -650,8 +651,23 @@ def make_train(config, env):
             save_path = os.path.join(save_dir, f'checkpoint_{step:0{update_step_length}}.safetensors')
 
             params = train_state.params
+
+            metadata = {
+                "rnorm": 
+                {
+                    "mean": rnorm.mean.item(),
+                    "M2": rnorm.M2.item(),
+                    "count": rnorm.count.item(),
+                }
+            }
+
+            params_to_save = {
+                "params": params,
+                "metadata": metadata,
+            }
+
             print(f"Saving checkpoint {save_path}")
-            save_params(params, save_path)
+            save_params(params_to_save, save_path)
 
         rng, _rng = jax.random.split(rng)
         test_state = get_greedy_metrics(_rng, train_state)
@@ -732,25 +748,6 @@ def single_run(config):
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
     train_vjit = jax.jit(jax.vmap(make_train(config, env)))
     outs = jax.block_until_ready(train_vjit(rngs))
-
-    # save final checkpoint
-    if config.get("SAVE_CHECKPOINTS", False):
-        model_state = outs["runner_state"][0]
-        save_dir = os.path.join(
-            config["HYDRA_PATH"],
-            'checkpoints')
-        os.makedirs(save_dir, exist_ok=True)
-
-        for i, rng in enumerate(rngs):
-            params = jax.tree.map(lambda x: x[i], model_state.params)
-            save_path = os.path.join(
-                save_dir,
-                str(rngs[i][0].item()),
-                f'checkpoint_final.safetensors',
-            )
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            print(f"Saving final checkpoint {save_path}")
-            save_params(params, save_path)
 
 
 def tune(default_config):
@@ -839,8 +836,7 @@ def tune(default_config):
 @hydra.main(version_base=None, config_path="./config", config_name="vdn_rnn_road_env")
 def main(config):
     config = OmegaConf.to_container(config)
-    print("Config:\n", OmegaConf.to_yaml(config))
-
+    
     print(jax.devices())
 
     if config.get("DOUBLE_PRECISION_MODE", False):
