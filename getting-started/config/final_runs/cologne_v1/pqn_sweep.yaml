@@ -2,7 +2,7 @@ command:
   - ${env}
   - python
   - ${program}
-  - --config-path=./config/final_runs/Cologne_v1
+  - --config-path=./config/final_runs/cologne_v1
 entity: imp-act
 method: grid
 metric:
