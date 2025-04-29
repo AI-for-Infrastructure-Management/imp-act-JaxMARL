@@ -28,11 +28,12 @@ class RoadEnvironment_Wrapper(object):
     """Jittable abstract base class for all jaxmarl Environments."""
 
     def __init__(
-        self, map_name, encoding_type="binary", include_extra_observations: dict = {}
+        self, map_name, encoding_type="binary", include_extra_observations: dict = {}, return_infos: bool = False
     ) -> None:
         """
         num_agents (int): maximum number of agents within the environment, used to set array dimensions
         """
+        self.return_infos = return_infos
         self.env = make(f"{map_name}-jax")
         self.map_name = map_name
         self.num_agents = self.env.total_num_segments
@@ -177,7 +178,10 @@ class RoadEnvironment_Wrapper(object):
 
         obs = jax.lax.cond(dones["__all__"], lambda: obs_re, lambda: obs_st)
         #! TODO: add infos
-        return obs, states, rewards, dones, {}
+        if self.return_infos:
+            return obs, states, rewards, dones, infos
+        else:
+            return obs, states, rewards, dones, {}
 
     def step_env(
         self, key: chex.PRNGKey, state: State, actions: Dict[str, chex.Array]
