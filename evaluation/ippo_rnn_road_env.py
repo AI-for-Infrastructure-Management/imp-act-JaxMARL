@@ -168,45 +168,45 @@ def evaluate_checkpoint(config_eval):
 
     def get_greedy_metrics(rng, params):
 
-        config["TEST_NUM_ACTORS"] = config["TEST_NUM_ENVS"] * env.num_agents
+        config_eval["TEST_NUM_ACTORS"] = config_eval["TEST_NUM_ENVS"] * env.num_agents
 
         def _greedy_env_step(step_state, unused):
             env_state, last_obs, last_done, hstate, rng = step_state
 
             # SELECT ACTION
             rng, _rng = jax.random.split(rng)
-            obs_batch = batchify(last_obs, env.agents, config["TEST_NUM_ACTORS"])
+            obs_batch = batchify(last_obs, env.agents, config_eval["TEST_NUM_ACTORS"])
             ac_in = (obs_batch[np.newaxis, :], last_done[np.newaxis, :])
             hstate, pi, _ = network.apply(params, hstate, ac_in)
             action = pi.sample(seed=_rng)
             env_act = unbatchify(
-                action, env.agents, config["TEST_NUM_ENVS"], env.num_agents
+                action, env.agents, config_eval["TEST_NUM_ENVS"], env.num_agents
             )
             env_act = {k: v.squeeze() for k, v in env_act.items()}
 
             # STEP ENV
             rng, _rng = jax.random.split(rng)
-            rng_step = jax.random.split(_rng, config["TEST_NUM_ENVS"])
+            rng_step = jax.random.split(_rng, config_eval["TEST_NUM_ENVS"])
             obsv, env_state, rewards, dones, infos = jax.vmap(
                 env.step, in_axes=(0, 0, 0)
             )(rng_step, env_state, env_act)
             infos = jax.tree.map(
-                lambda x: x.reshape((config["TEST_NUM_ACTORS"])), infos
+                lambda x: x.reshape((config_eval["TEST_NUM_ACTORS"])), infos
             )
             done_batch = batchify(
-                dones, env.agents, config["TEST_NUM_ACTORS"]
+                dones, env.agents, config_eval["TEST_NUM_ACTORS"]
             ).squeeze()
 
             step_state = (env_state, obsv, done_batch, hstate, rng)
             return step_state, (rewards, dones, infos)
 
         rng, _rng = jax.random.split(rng)
-        reset_rng = jax.random.split(_rng, config["TEST_NUM_ENVS"])
+        reset_rng = jax.random.split(_rng, config_eval["TEST_NUM_ENVS"])
         init_obs, env_state = jax.vmap(env.reset, in_axes=(0,))(reset_rng)
         init_hstate = ScannedRNN.initialize_carry(
-            config["TEST_NUM_ACTORS"], config["GRU_HIDDEN_DIM"]
+            config_eval["TEST_NUM_ACTORS"], config["GRU_HIDDEN_DIM"]
         )
-        done_batch = jnp.zeros((config["TEST_NUM_ACTORS"],), dtype=jnp.bool_)
+        done_batch = jnp.zeros((config_eval["TEST_NUM_ACTORS"],), dtype=jnp.bool_)
         step_state = (
             env_state,
             init_obs,
@@ -215,7 +215,7 @@ def evaluate_checkpoint(config_eval):
             rng,
         )
         step_state, (rewards, dones, infos) = jax.lax.scan(
-            _greedy_env_step, step_state, None, config["TEST_NUM_STEPS"]
+            _greedy_env_step, step_state, None, config_eval["TEST_NUM_STEPS"]
         )
         metrics = jax.tree.map(
             lambda x: jnp.nanmean(
