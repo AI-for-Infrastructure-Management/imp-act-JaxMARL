@@ -89,7 +89,9 @@ elif MAP_NAME == "Cologne-v1":
     TEST_NUM_ENVS = 200
     TEST_NUM_STEPS = 50 * 50
 
-assert TEST_NUM_ENVS * TEST_NUM_STEPS == 50 * 10_000, "Total timesteps should be 50 * 10_000"
+assert (
+    TEST_NUM_ENVS * TEST_NUM_STEPS == 50 * 10_000
+), "Total timesteps should be 50 * 10_000"
 
 if rank == 0:
     print(f"MAP_NAME: {MAP_NAME}")
@@ -102,7 +104,7 @@ if rank == 0:
 time_main_0 = time.time()
 
 #! ALGORITHMS
-for alg in [ALGORITHMS[TASK_ARRAY_ID]-1]:
+for alg in [ALGORITHMS[TASK_ARRAY_ID - 1]]:
 
     all_eval_stats_process = []
     all_eval_stats = []
