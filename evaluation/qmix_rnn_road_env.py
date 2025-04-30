@@ -211,7 +211,6 @@ def load_checkpoint_agent(checkpoint_path, step, vmapped_seed, config):
 
     loaded_params = load_params(load_path)
 
-    params = loaded_params["params"]
     metadata = loaded_params["metadata"]
 
     rnorm = RunningStats(
@@ -231,25 +230,17 @@ def load_checkpoint_agent(checkpoint_path, step, vmapped_seed, config):
         config["MIXER_INIT_SCALE"],
     )
 
-    return params, rnorm, network, mixer
+    return loaded_params, rnorm, network, mixer
 
-def evaluate_checkpoint(config_eval):
-    rng = jax.random.PRNGKey(config_eval.get("SEED"))
-    checkpoint_path = config_eval["CHECKPOINT_PATH"]
-    step = config_eval["STEP"]
-    vmapped_seed = config_eval.get("VMAPPED_SEED", 0)
 
-    # load YAML
-    config = OmegaConf.load(os.path.join(checkpoint_path, "config.yaml"))
-    config = OmegaConf.to_container(config)
+def make_get_greedy_metrics(train_config, test_num_envs, test_num_steps):
+    env, env_name = env_from_config(copy.deepcopy(train_config))
+    env = CTRolloutManager(env, batch_size=test_num_envs, preprocess_obs=False)
 
-    env, env_name = env_from_config(copy.deepcopy(config))
-
-    env = CTRolloutManager(env, batch_size=config_eval["TEST_NUM_ENVS"], preprocess_obs=False)
-
-    config["MAX_ACTION_SPACE"] = env.max_action_space
-    
-    loaded_params, rnorm, network, mixer = load_checkpoint_agent(checkpoint_path, step, vmapped_seed, config)
+    network = RNNQNetwork(
+        action_dim=env.max_action_space,
+        hidden_dim=train_config["HIDDEN_SIZE"],
+    )
 
     def batchify(x: dict):
         return jnp.stack([x[agent] for agent in env.agents], axis=0)
@@ -263,7 +254,7 @@ def evaluate_checkpoint(config_eval):
         return jnp.argmax(q_vals, axis=-1)
 
     def get_greedy_metrics(rng, loaded_params): 
-            params = loaded_params['agent']  
+            params = loaded_params["params"]['agent']  
             def _greedy_env_step(step_state, unused):
                 params, env_state, last_obs, last_dones, hstate, rng = step_state
                 rng, key_s = jax.random.split(rng)
@@ -288,12 +279,12 @@ def evaluate_checkpoint(config_eval):
             rng, _rng = jax.random.split(rng)
             init_obs, env_state = env.batch_reset(_rng)
             init_dones = {
-                agent: jnp.zeros((config_eval["TEST_NUM_ENVS"]), dtype=bool)
+                agent: jnp.zeros((test_num_envs), dtype=bool)
                 for agent in env.agents + ["__all__"]
             }
             rng, _rng = jax.random.split(rng)
             hstate = ScannedRNN.initialize_carry(
-                config["HIDDEN_SIZE"], len(env.agents), config_eval["TEST_NUM_ENVS"]
+                train_config["HIDDEN_SIZE"], len(env.agents), test_num_envs
             )  # (n_agents*n_envs, hs_size)
             step_state = (
                 params,
@@ -304,23 +295,50 @@ def evaluate_checkpoint(config_eval):
                 _rng,
             )
             step_state, (rewards, dones, infos) = jax.lax.scan(
-                _greedy_env_step, step_state, None, config_eval["TEST_NUM_STEPS"]
+                _greedy_env_step, step_state, None, test_num_steps
             )
-            metrics = jax.tree.map(
-                lambda x: jnp.nanmean(
-                    jnp.where(
-                        infos["returned_episode"],
-                        x,
-                        jnp.nan,
-                    )
-                ),
-                infos,
-            )
-            metrics["episodes"] = config_eval["TEST_NUM_ENVS"]
-            return metrics
+
+            return infos
     
+    return get_greedy_metrics
+
+
+def evaluate_checkpoint(config_eval):
+    rng = jax.random.PRNGKey(config_eval.get("SEED"))
+    checkpoint_path = config_eval["CHECKPOINT_PATH"]
+    step = config_eval["STEP"]
+    vmapped_seed = config_eval.get("VMAPPED_SEED", 0)
+
+    # load YAML
+    config = OmegaConf.load(os.path.join(checkpoint_path, "config.yaml"))
+    config = OmegaConf.to_container(config)
+
+    env, env_name = env_from_config(copy.deepcopy(config))
+
+    env = CTRolloutManager(env, batch_size=config_eval["TEST_NUM_ENVS"], preprocess_obs=False)
+
+    config["MAX_ACTION_SPACE"] = env.max_action_space
+    
+    loaded_params, rnorm, network, mixer = load_checkpoint_agent(checkpoint_path, step, vmapped_seed, config)
+
+    get_greedy_metrics = make_get_greedy_metrics(
+        config, config_eval["TEST_NUM_ENVS"], config_eval["TEST_NUM_STEPS"]
+    )
+
     rng, _rng = jax.random.split(rng)
-    metrics = get_greedy_metrics(_rng, loaded_params)
+    infos = get_greedy_metrics(_rng, loaded_params)
+    
+    metrics = jax.tree.map(
+        lambda x: jnp.nanmean(
+            jnp.where(
+                infos["returned_episode"],
+                x,
+                jnp.nan,
+            )
+        ),
+        infos,
+    )
+    metrics["episodes"] = config_eval["TEST_NUM_ENVS"]
     
     log.info(f"Evaluation metrics for checkpoint at step {step} with {config_eval['TEST_NUM_ENVS']} envs:")
     log.info(f"  Environment: {env_name}")
