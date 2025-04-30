@@ -102,7 +102,7 @@ if rank == 0:
 time_main_0 = time.time()
 
 #! ALGORITHMS
-for alg in [ALGORITHMS[TASK_ARRAY_ID]]:
+for alg in [ALGORITHMS[TASK_ARRAY_ID]-1]:
 
     all_eval_stats_process = []
     all_eval_stats = []
