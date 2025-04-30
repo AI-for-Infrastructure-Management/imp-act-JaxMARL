@@ -18,12 +18,14 @@ from jaxmarl.wrappers.baselines import load_params
 
 MAP_NAME = "ToyExample-v2"
 ALGORITHMS = ["vdn_rnn", "qmix_rnn", "pqn_rnn", "mappo_rnn", "ippo_rnn"]
-TEST_NUM_ENVS = 100
-TEST_NUM_STEPS = 50
+NUM_CHECKPOINTS = 100
 VMAPPED_SEED = 0
 EVAL_SEED = 0
 REWARD_SCALE = 1e6
-BASE_PATH = os.getcwd()
+BASE_PATH = "/home/pbhustali/prateek/imp-act-JaxMARL"
+MODELS_PATH = f"{BASE_PATH}/outputs"
+RESULTS_PATH = f"{BASE_PATH}/inference/{MAP_NAME}"
+os.makedirs(RESULTS_PATH, exist_ok=True)
 
 # read YAML file with all checkpoints dir names
 with open(f"{BASE_PATH}/inference/all_checkpoint_dirs.yaml", "r") as f:
@@ -68,13 +70,24 @@ def compute_episode_return_stats(episode_returns):
 
 ############################ EVALUATION ################################
 
+TEST_NUM_ENVS = 10
+TEST_NUM_STEPS = 50 * 10
+
+print(f"MAP_NAME: {MAP_NAME}")
+print(f"VMAPPED_SEED: {VMAPPED_SEED}")
+print(f"EVAL_SEED: {EVAL_SEED}")
+print(f"TEST_NUM_ENVS: {TEST_NUM_ENVS}")
+print(f"TEST_NUM_STEPS: {TEST_NUM_STEPS}")
+print(f"TOTAL TIMESTEPS: {TEST_NUM_ENVS * TEST_NUM_STEPS}")
+
 all_eval_stats = []
 
 time_main_0 = time.time()
 
 #! ALGORITHMS
-# for a, alg in enumerate(ALGORITHMS):
-for a, alg in enumerate(["mappo_rnn"]):  #! ALGORITHM: "mappo_rnn"
+# for alg in ALGORITHMS:
+for alg in ["mappo_rnn"]:  #! ALGORITHM: "mappo_rnn"
+
     chkpt_dirs_alg = all_checkpoint_dirs[MAP_NAME][alg]
 
     make_get_greedy_metrics = import_function_from_path(
@@ -83,28 +96,31 @@ for a, alg in enumerate(["mappo_rnn"]):  #! ALGORITHM: "mappo_rnn"
     )
 
     #! SEEDS
-    # for i, chkpt_dir in enumerate(chkpt_dirs_alg):
-    for i, chkpt_dir_name in enumerate([chkpt_dirs_alg[0]]):  #! SEED: 0
+    # for j, chkpt_dir_name in enumerate(chkpt_dirs_alg):
+    for j, chkpt_dir_name in enumerate([chkpt_dirs_alg[0]]):  #! SEED: 0
 
         train_config_path = (
-            f"{BASE_PATH}/outputs/{MAP_NAME}/{alg}/{chkpt_dir_name}/config.yaml"
+            f"{MODELS_PATH}/{MAP_NAME}/{alg}/{chkpt_dir_name}/config.yaml"
         )
         train_config = yaml.safe_load(open(train_config_path, "r"))
         rngs = jax.random.split(
             jax.random.PRNGKey(train_config["SEED"]), train_config["NUM_SEEDS"]
         )
-        checkpoint_path = f"{BASE_PATH}/outputs/{MAP_NAME}/{alg}/{chkpt_dir_name}/checkpoints/{rngs[VMAPPED_SEED][0]}"
+        checkpoint_path = f"{MODELS_PATH}/{MAP_NAME}/{alg}/{chkpt_dir_name}/checkpoints/{rngs[VMAPPED_SEED][0]}"
 
         env = jaxmarl.make(train_config["ENV_NAME"], **train_config["ENV_KWARGS"])
 
         jit_get_greedy_metrics = jax.jit(
             make_get_greedy_metrics(train_config, TEST_NUM_ENVS, TEST_NUM_STEPS)
         )
+        all_safetensor_names = list(sorted(os.listdir(checkpoint_path)))
 
         #! CHECKPOINTS
-        for i, safetensor_name in enumerate(sorted(os.listdir(checkpoint_path))):
+        for k in range(NUM_CHECKPOINTS):
+
             time0 = time.time()
 
+            safetensor_name = all_safetensor_names[k]
             checkpoint_id = safetensor_name.split(".")[0].split("_")[-1]
             safetensor_path = os.path.join(checkpoint_path, safetensor_name)
             loaded_params = load_params(safetensor_path)
@@ -148,13 +164,11 @@ for a, alg in enumerate(["mappo_rnn"]):  #! ALGORITHM: "mappo_rnn"
             )
 
             print(
-                f" {i+1:<3} | Checkpoint: {checkpoint_id:<4} | time: {time.time()-time0:.2f} | mean: {mean:.2f} | 95% CI: ({_95_ci[0]:.2f}, {_95_ci[1]:.2f})"
+                f" Algorithm: {alg:<9} | Seed ({j+1:>2}): {rngs[VMAPPED_SEED][0]:<10} | Checkpoint ({k+1:>3}): {checkpoint_id:<4} | time: {time.time()-time0:.2f} | mean: {mean:.2f} | 95% CI: ({_95_ci[0]:.2f}, {_95_ci[1]:.2f})"
             )
 
-print(f"Total time: {time.time()-time_main_0:.2f}")
-
 df = pd.DataFrame(all_eval_stats)
-df.to_csv("inference/inference_results.csv", index=False)
-print("Saved inference stats to inference/inference_results.csv")
-print(df.head())
-print(df)
+df.to_csv(f"{BASE_PATH}/inference/{MAP_NAME}/inference_results.csv", index=False)
+print(f"Saved inference stats to inference_results.csv")
+
+print(f"Total time: {time.time()-time_main_0:.2f}")
