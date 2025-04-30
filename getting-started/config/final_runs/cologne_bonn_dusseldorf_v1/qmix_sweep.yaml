@@ -1,0 +1,27 @@
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --config-path=./config/final_runs/cologne_bonn_dusseldorf_v1
+entity: imp-act
+method: grid
+metric:
+  goal: maximize
+  name: test_returned_episode_returns
+name: qmix_rnn_final_run
+parameters:
+  SEED:
+    values:
+      - 2411725836
+      - 1769144590
+      - 1729133645
+      - 1039433210
+      - 1506812145
+      - 2519822500
+      - 2760380712
+      - 1670876600
+      - 4061526404
+      - 1033305736
+
+program: getting-started/qmix_rnn_road_env.py
+project: jaxMARL-CologneBonnDusseldorf-v1-final
