@@ -16,13 +16,13 @@ import jaxmarl
 from jaxmarl.wrappers.baselines import load_params
 
 
-MAP_NAME = "ToyExample-v2"
-ALGORITHMS = ["vdn_rnn", "qmix_rnn", "pqn_rnn", "mappo_rnn", "ippo_rnn"]
+MAP_NAME = "CologneBonnDusseldorf-v1"
+ALGORITHMS = ["qmix_rnn"]
 NUM_CHECKPOINTS = 100
 VMAPPED_SEED = 0
 EVAL_SEED = 0
 REWARD_SCALE = 1e6
-BASE_PATH = "/home/pbhustali/prateek/imp-act-JaxMARL"
+BASE_PATH = "/workspace/imp-act-JaxMARL"
 MODELS_PATH = f"{BASE_PATH}/outputs"
 RESULTS_PATH = f"{BASE_PATH}/inference/{MAP_NAME}"
 os.makedirs(RESULTS_PATH, exist_ok=True)
@@ -70,8 +70,10 @@ def compute_episode_return_stats(episode_returns):
 
 ############################ EVALUATION ################################
 
-TEST_NUM_ENVS = 10
+TEST_NUM_ENVS = 1000
 TEST_NUM_STEPS = 50 * 10
+
+assert TEST_NUM_ENVS * TEST_NUM_STEPS == 50 * 10_000
 
 print(f"MAP_NAME: {MAP_NAME}")
 print(f"VMAPPED_SEED: {VMAPPED_SEED}")
@@ -80,14 +82,13 @@ print(f"TEST_NUM_ENVS: {TEST_NUM_ENVS}")
 print(f"TEST_NUM_STEPS: {TEST_NUM_STEPS}")
 print(f"TOTAL TIMESTEPS: {TEST_NUM_ENVS * TEST_NUM_STEPS}")
 
-all_eval_stats = []
-
 time_main_0 = time.time()
 
 #! ALGORITHMS
-# for alg in ALGORITHMS:
-for alg in ["mappo_rnn"]:  #! ALGORITHM: "mappo_rnn"
+for alg in ALGORITHMS:
 
+    all_eval_stats = []
+    
     chkpt_dirs_alg = all_checkpoint_dirs[MAP_NAME][alg]
 
     make_get_greedy_metrics = import_function_from_path(
@@ -96,8 +97,8 @@ for alg in ["mappo_rnn"]:  #! ALGORITHM: "mappo_rnn"
     )
 
     #! SEEDS
-    # for j, chkpt_dir_name in enumerate(chkpt_dirs_alg):
-    for j, chkpt_dir_name in enumerate([chkpt_dirs_alg[0]]):  #! SEED: 0
+    for j, chkpt_dir_name in enumerate(chkpt_dirs_alg):
+    # for j, chkpt_dir_name in enumerate([chkpt_dirs_alg[0]]):  #! SEED: 0
 
         train_config_path = (
             f"{MODELS_PATH}/{MAP_NAME}/{alg}/{chkpt_dir_name}/config.yaml"
@@ -167,8 +168,8 @@ for alg in ["mappo_rnn"]:  #! ALGORITHM: "mappo_rnn"
                 f" Algorithm: {alg:<9} | Seed ({j+1:>2}): {rngs[VMAPPED_SEED][0]:<10} | Checkpoint ({k+1:>3}): {checkpoint_id:<4} | time: {time.time()-time0:.2f} | mean: {mean:.2f} | 95% CI: ({_95_ci[0]:.2f}, {_95_ci[1]:.2f})"
             )
 
-df = pd.DataFrame(all_eval_stats)
-df.to_csv(f"{BASE_PATH}/inference/{MAP_NAME}/inference_results.csv", index=False)
-print(f"Saved inference stats to inference_results.csv")
+    df = pd.DataFrame(all_eval_stats)
+    df.to_csv(f"{BASE_PATH}/inference/{MAP_NAME}/inference_results_{alg}.csv", index=False)
+    print(f"Saved inference stats to inference_results_{alg}.csv")
 
 print(f"Total time: {time.time()-time_main_0:.2f}")
