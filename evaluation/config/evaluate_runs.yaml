@@ -1,0 +1,13 @@
+MAP_NAME : "ToyExample-v2"
+ALGORITHMS : ["vdn_rnn"]
+TEST_NUM_ENVS : 1000
+TEST_NUM_EPISODES: 10000
+VMAPPED_SEED : 0
+EVAL_SEED : 0
+REWARD_SCALE : 1e6
+BASE_PATH : Null
+TOP_K_CHECKPOINTS : 10
+
+hydra:
+  run:
+    dir: outputs/evaluation/${MAP_NAME}/${now:%Y-%m-%d_%H-%M-%S.%f}  # Directory to save evaluation results
