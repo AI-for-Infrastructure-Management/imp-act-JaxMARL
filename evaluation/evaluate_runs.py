@@ -98,7 +98,7 @@ def evaluate_checkpoint(path, config):
                 results_dir / "results.yaml",
                 backup_path / f"old_.yaml",
             )
-            log.info(f"Old results file moved to {backup_path / 'old_.yaml'}")
+            log.info(f"Old results file moved to {backup_path / 'old_results.yaml'}")
 
     rngs = jax.random.split(
         jax.random.PRNGKey(train_config["SEED"]), train_config["NUM_SEEDS"]
