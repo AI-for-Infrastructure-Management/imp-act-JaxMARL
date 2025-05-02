@@ -85,6 +85,7 @@ def evaluate_checkpoint(path, config):
             loaded_config["EVAL_SEED"] == config['EVAL_SEED']
             and loaded_config["TEST_NUM_EPISODES"] == config['TEST_NUM_EPISODES']
             and loaded_config["TEST_NUM_ENVS"] == config['TEST_NUM_ENVS']
+            and loaded_config["TOP_K_CHECKPOINTS"] == config['TOP_K_CHECKPOINTS']
         ):
             log.info("Evaluation results already exist, skipping evaluation.")
             eval_stats = results["eval_stats"]
