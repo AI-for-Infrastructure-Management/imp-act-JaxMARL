@@ -60,7 +60,7 @@ def download_run(run: wandb.apis.public.Run | str) -> dict:
     
     return run_data
 
-def store_run_data(run_data: dict, path: Path) -> None:
+def store_run_data(run_data: dict, run_path: Path) -> None:
     """
     Stores the downloaded run data to the filesystem.
     
@@ -68,7 +68,6 @@ def store_run_data(run_data: dict, path: Path) -> None:
         run_data: Dictionary containing the run data to store.
         path: Path where the run data will be stored.
     """
-    run_path = Path.joinpath(path, run_data['id'])
     run_path.mkdir(parents=True, exist_ok=True)
 
     # save the config
@@ -121,7 +120,7 @@ def download_sweep(sweep_id: str, path: str) -> dict:
         print(f'Downloading data for run {run.name}')
 
         run_data = download_run(run)
-        store_run_data(run_data, sweep_path)
+        store_run_data(run_data, sweep_path / run.id)
 
 
     with open(f'{sweep_path}/sweep_summary.yaml', 'w') as f:

@@ -88,7 +88,7 @@ def evaluate_checkpoint(path, config):
         ):
             log.info("Evaluation results already exist, skipping evaluation.")
             eval_stats = results["eval_stats"]
-            return eval_stats
+            return eval_stats, train_config
         else:
             log.info("Evaluation results exist, but parameters are different. Re-evaluating...")
             # move the old results file to a backup location in hydra
@@ -122,14 +122,14 @@ def evaluate_checkpoint(path, config):
         
         entity, project, run_id = get_run_from_link(train_config["WANDB_RUN_URL"])
 
-        run_store_path = path / "wandb" / run_id
+        run_store_path = path / "wandb"
 
         if not (run_store_path / "config.yaml").exists():
             log.info(f"Downloading run data for {run_id}...")
             run_store_path.mkdir(parents=True, exist_ok=True)
             run_str = f"{entity}/{project}/{run_id}"
             run_data = download_run(run_str)
-            store_run_data(run_data, run_store_path.parent)
+            store_run_data(run_data, run_store_path)
         else:
             log.info(f"Run data for {run_id} already exists, skipping download.")
 
@@ -141,7 +141,7 @@ def evaluate_checkpoint(path, config):
         top_k_checkpoints = np.argsort(checkpoint_returns)[-top_k:]
         evaluate_checkpoints = [all_safetensor_names[i] for i in top_k_checkpoints]
 
-    #! CHECKPOINTS
+    log.info(f"Evaluating {len(evaluate_checkpoints)} checkpoints")
     eval_stats = []
     for k, safetensor_name in enumerate(evaluate_checkpoints):
         time0 = time.time()
@@ -173,7 +173,7 @@ def evaluate_checkpoint(path, config):
 
         eval_stats.append(
             {
-                "map_name": config['MAP_NAME'],
+                "map_name": train_config['ENV_KWARGS']['map_name'],
                 "algorithm": train_config["ALG_NAME"],
                 "checkpoint_dir_name": str(path),
                 "WANDB_RUN_ID": train_config["WANDB_RUN_ID"],
@@ -201,7 +201,7 @@ def evaluate_checkpoint(path, config):
 
     yaml.dump(results, open(results_dir / f"results.yaml", "w"))
     
-    return eval_stats
+    return eval_stats, train_config
 
 
 def evaluate_checkpoints(config):
@@ -214,36 +214,54 @@ def evaluate_checkpoints(config):
     config['TEST_NUM_STEPS'] = 50 * int(np.ceil(config['TEST_NUM_EPISODES'] / config['TEST_NUM_ENVS']))
     assert config['TEST_NUM_ENVS'] * config['TEST_NUM_STEPS'] == 50 * config['TEST_NUM_EPISODES'] # Make sure the total number of timesteps is correct
 
-    with open(base_path / "inference/all_checkpoint_dirs.yaml", "r") as f:
-        all_checkpoint_dirs = yaml.safe_load(f)
-    
+    def find_run_directories_recursively(path):
+        # detect if this is a run directory
+
+        if (path / "checkpoints").exists():
+            run_paths = [path]
+        else:
+            run_paths = []
+            for subdir in path.iterdir():
+                if subdir.is_dir():
+                    run_paths.extend(find_run_directories_recursively(subdir))
+
+        return run_paths
+
+    evaluation_path = Path(config.get('EVALUATION_PATH', base_path / "outputs"))
+    if not evaluation_path.exists():
+        raise FileNotFoundError(f"Evaluation path {evaluation_path} does not exist")
+
+    log.info(f"Searching for run directories in {evaluation_path}")
+    run_paths = find_run_directories_recursively(evaluation_path)
+    log.info(f"Found {len(run_paths)} run directories")
+
     time_main_0 = time.time()
 
-    #! ALGORITHMS
-    for alg in config['ALGORITHMS']:
-        log.info(f"Evaluating algorithm: {alg}")
-        all_eval_stats = []
+    all_eval_stats = {}
+    for run_path in run_paths:
+        log.info(f"Evaluating checkpoint: {run_path}")
+        eval_stats, train_config = evaluate_checkpoint(run_path, config)
+        alg = train_config["ALG_NAME"]
+        map_name = train_config["ENV_KWARGS"]["map_name"]
         
-        chkpt_dirs_alg = all_checkpoint_dirs[config['MAP_NAME']][alg]
+        if not map_name in all_eval_stats:
+            all_eval_stats[map_name] = {}
+        if not alg in all_eval_stats[map_name]:
+            all_eval_stats[map_name][alg] = []
+        all_eval_stats[map_name][alg].extend(eval_stats)
 
-        #! SEEDS
-        for j, chkpt_dir_name in enumerate(chkpt_dirs_alg):
-            log.info(f"Evaluating checkpoint: {chkpt_dir_name}")
-            path = base_path / "outputs" / config['MAP_NAME'] / alg / chkpt_dir_name
-            eval_stats = evaluate_checkpoint(path, config)
-            all_eval_stats.extend(eval_stats)
-
-        # Save algorithm-specific results
-        results_dir = result_path / f"{config['MAP_NAME']}"
-        os.makedirs(results_dir, exist_ok=True)
-        df = pd.DataFrame(all_eval_stats)
-        df.to_csv(results_dir / f"inference_results_{alg}.csv", index=False)
-        log.info(f"Saved inference stats to {results_dir}/inference_results_{alg}.csv")
-
-    # Combine all algorithm results into one CSV
-    all_results_files = [result_path / f"{config['MAP_NAME']}/inference_results_{alg}.csv" for alg in config['ALGORITHMS']]
-    all_results = pd.concat([pd.read_csv(f) for f in all_results_files if os.path.exists(f)])
-    
+    # Save algorithm-specific results
+    all_eval_stats_list = []
+    for map_name, alg_stats in all_eval_stats.items():
+        for alg, eval_stats in alg_stats.items():
+            all_eval_stats_list.extend(eval_stats)
+            df = pd.DataFrame(eval_stats)
+            path = result_path / map_name / alg
+            os.makedirs(path, exist_ok=True)
+            df.to_csv(path / f"inference_results_{alg}.csv", index=False)
+            log.info(f"Saved inference stats to {path}/inference_results_{alg}.csv")
+            
+    all_results = pd.DataFrame(all_eval_stats_list)
     all_results.to_csv(result_path / "inference_results.csv", index=False)
     log.info(f"Saved combined inference stats to {result_path}/inference_results.csv")
     
