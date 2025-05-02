@@ -1,6 +1,6 @@
 MAP_NAME : "ToyExample-v2"
 ALGORITHMS : ["vdn_rnn"]
-TEST_NUM_ENVS : 1000
+TEST_NUM_ENVS : 10000
 TEST_NUM_EPISODES: 10000
 VMAPPED_SEED : 0
 EVAL_SEED : 0
@@ -10,4 +10,4 @@ TOP_K_CHECKPOINTS : 10
 
 hydra:
   run:
-    dir: outputs/evaluation/${MAP_NAME}/${now:%Y-%m-%d_%H-%M-%S.%f}  # Directory to save evaluation results
+    dir: outputs/evaluation/${MAP_NAME}/${ALGORITHMS}/${now:%Y-%m-%d_%H-%M-%S.%f}  # Directory to save evaluation results
