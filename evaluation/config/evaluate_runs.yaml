@@ -1,0 +1,12 @@
+EVALUATION_PATH: "outputs/ToyExample-v2"
+TEST_NUM_ENVS : 100
+TEST_NUM_EPISODES: 100
+VMAPPED_SEED : 0
+EVAL_SEED : 0
+REWARD_SCALE : 1e6
+BASE_PATH : Null
+TOP_K_CHECKPOINTS : 10
+
+hydra:
+  run:
+    dir: outputs/evaluation/${now:%Y-%m-%d_%H-%M-%S.%f}  # Directory to save evaluation logs

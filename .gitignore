@@ -16,3 +16,5 @@ wandb/
 outputs/
 models/
 !plot_rollout.ipynb
+*.csv
+!results.ipynb

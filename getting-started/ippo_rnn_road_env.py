@@ -584,6 +584,10 @@ def make_train(config):
                             }
                         )
                     metrics_conversion = {k: float(v) for k, v in metrics.items()}
+                    try:
+                        metrics_conversion["gpu_stats"] = jax.devices()[0].memory_stats()
+                    except IndexError:
+                        pass
                     wandb.log(metrics_conversion, step=metrics["update_steps"])
 
                 jax.debug.callback(callback, metrics, original_seed)
@@ -768,7 +772,7 @@ def single_run(config):
 
     # Save actual config
     config["WANDB_RUN_ID"] = wandb.run.id
-    config["WANDB_RUN_URL"] = wandb.run.get_url()
+    config["WANDB_RUN_URL"] = wandb.run.url
     config["WANDB_RUN_NAME"] = wandb.run.name
 
     OmegaConf.save(config, os.path.join(config["HYDRA_PATH"], "config.yaml"))

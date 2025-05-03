@@ -752,7 +752,7 @@ def single_run(config):
 
     # Save actual config
     config["WANDB_RUN_ID"] = wandb.run.id
-    config["WANDB_RUN_URL"] = wandb.run.get_url()
+    config["WANDB_RUN_URL"] = wandb.run.url
     config["WANDB_RUN_NAME"] = wandb.run.name
 
     OmegaConf.save(
