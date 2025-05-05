@@ -9,8 +9,8 @@ norm_constant: 1e6
 plot_histogram: True
 double_precision_mode: False
 priorization_params: 
-  priorization_key: "segment_lengths" # Options: "segment_lengths", "costs", "volumes"
-  priorization_sign: "negative"
+  priorization_key: "volumes" # Options: "segment_lengths", "costs", "volumes"
+  priorization_sign: "positive"
 
 # Optimization parameters
 optimization:
