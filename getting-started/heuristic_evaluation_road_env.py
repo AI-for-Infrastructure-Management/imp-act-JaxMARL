@@ -25,7 +25,7 @@ def get_policy_do_nothing(params=None):
     Args:
         params: Not used for this policy, included for consistency.
     """
-    def policy(key, state, obs):
+    def policy(key, state, obs, env):
         """Policy that does nothing."""
         return {agent: 0 for agent in obs.keys()}
     return policy
@@ -36,7 +36,7 @@ def get_policy_random(params=None):
     Args:
         params: Not used for this policy, included for consistency.
     """
-    def policy(key, state, obs):
+    def policy(key, state, obs, env):
         """Policy that picks a random action (0, 1, or 2) for each agent."""
         num_agents = len(obs)
         num_actions = 3  # Update this if you have more or fewer discrete actions
@@ -56,8 +56,11 @@ def get_policy_humble_heuristic(params):
     inspection_interval = params.get("inspection_interval", 6)
     repair_threshold = params.get("repair_threshold", 1)
     
-    def policy(key, state, obs):
+    def policy(key, state, obs, env):
         """Policy that inspects at specified intervals and repairs when observation exceeds threshold."""
+        road_env = env._env.env
+        road_env_state = state.env_state
+        
         tstep = state.env_state.timestep
         obs_insp = state.env_state.observation
         # Step 1: Initialize with default action 0
@@ -66,16 +69,111 @@ def get_policy_humble_heuristic(params):
         actions = jnp.where(tstep % inspection_interval == 0, 1, actions)
         # Step 3: Apply condition for repair based on configured threshold
         actions = jnp.where(obs_insp > repair_threshold, 2, actions)
-        actions_dict = {f"agent_{i}": actions[i] for i in range(len(obs))}
-        return actions_dict
+
+        return actions
     return policy
+
+def get_budget_prioritized_policy(policy, params):
+    """Returns a prioritized policy function with configurable parameters.
+    
+    Args:
+        params: Dictionary containing:
+            - inspection_interval: Timestep interval for inspection (action 1)
+            - repair_threshold: Observation threshold above which repair action is taken (action 2)
+    """
+
+    def prioritized_policy(key, state, obs, env):
+        """Policy that inspects at specified intervals and repairs when observation exceeds threshold."""
+        road_env = env._env.env
+        road_env_state = state.env_state
+
+        action = policy(key, state, obs, env)
+
+        # Step 4: Prioritize repair actions
+        forced_action, forced_repair_mask = road_env._apply_forced_repair_constraint(
+            action, road_env_state.worst_obs_counter
+        )
+
+        do_nothing_action = jnp.zeros_like(action)
+
+        action = jnp.where(
+            forced_repair_mask,
+            do_nothing_action,
+            action,
+        )
+
+        # Make sure real damage state cannot be used as info
+        road_env_state = road_env_state.replace(
+            damage_state = jnp.zeros_like(road_env_state.damage_state),
+        )
+        
+        do_nothing_forced_repair_mask = jnp.full_like(forced_repair_mask, False)
+        upfront_cost = road_env._get_budget_action_cost(
+            road_env_state, do_nothing_action, do_nothing_forced_repair_mask
+        )
+        future_upfront_cost = upfront_cost * (
+            road_env.get_budget_remaining_time(road_env_state.timestep) - 1
+        )
+
+        # Calculate adjusted costs
+        action_cost = road_env._get_budget_action_cost(road_env_state, action, forced_repair_mask)
+        adjusted_cost = action_cost - upfront_cost
+
+        remaining_budget = (
+            road_env_state.budget_remaining
+            - jnp.sum(upfront_cost)
+            - jnp.sum(future_upfront_cost)
+        )
+
+        # Apply constraints if needed
+        def apply_constraints():
+            # Select actions based on most effective cost-benefit ratio (negative due to )
+            if params["priorization_key"] == "cost":
+                priorities = adjusted_cost
+            elif params["priorization_key"] == "segment_lengths":
+                priorities = road_env.segment_lengths
+            elif params["priorization_key"] == "volumes":
+                priorities = road_env.initial_edge_volumes
+            else:
+                raise ValueError(f"Unknown priorization key: {params['priorization_key']}")
+            
+            if params.get("priorization_sign") == "negative":
+                priorities = -priorities
+
+            # Don't constrain forced repairs
+            priorities = jnp.where(forced_repair_mask, -jnp.inf, priorities)
+            sorted_indices = jnp.argsort(priorities, descending=True)
+            cumulative_costs = jnp.cumsum(adjusted_cost[sorted_indices])
+            valid_mask = cumulative_costs <= remaining_budget
+
+            # Create array of constrained actions in original order
+            constrained_action = jnp.zeros_like(action)
+            constrained_action = constrained_action.at[sorted_indices].set(
+                jnp.where(
+                    valid_mask,
+                    action[sorted_indices],
+                    do_nothing_action[sorted_indices],
+                )
+            )
+
+            return constrained_action, True
+
+        constrained_action, constraint_applied = jax.lax.cond(
+            jnp.sum(adjusted_cost) > remaining_budget,
+            lambda: apply_constraints(),
+            lambda: (action, False),
+        )
+
+        actions_dict = {f"agent_{i}": constrained_action[i] for i in range(len(obs))}
+        return actions_dict
+    return prioritized_policy
 
 def run_rollout(key, env, policy, num_steps):
     """Run a rollout in the environment."""
     def scan_step(carry, _):
         key, total_reward, last_obs, last_state = carry
         key, key_act = jax.random.split(key)
-        actions = policy(key_act, last_state, last_obs)
+        actions = policy(key_act, last_state, last_obs, env)
         key, key_step = jax.random.split(key)
         obs, state, reward, done, infos = env.step(key_step, last_state, actions)
         total_reward = total_reward + reward["__all__"]
@@ -96,7 +194,7 @@ def run_rollout(key, env, policy, num_steps):
     )
     return total_reward, dones.any(), log_wrapper_return
 
-@hydra.main(config_path="config/heuristics", config_name="toy_example_do_nothing", version_base=None)
+@hydra.main(config_path="config/heuristics", config_name="toy_example_humble_heuristic", version_base=None)
 def main(cfg: DictConfig):
     # Log the configuration
     print(f"Configuration:\n{OmegaConf.to_yaml(OmegaConf.to_container(cfg))}")
@@ -114,6 +212,9 @@ def main(cfg: DictConfig):
     # Extract policy parameters if they exist
     policy_params = cfg.get("policy_params", {})
     policy = policy_factory(policy_params)
+
+    if cfg.get("priorization_params") is not None:
+        policy = get_budget_prioritized_policy(policy, cfg.priorization_params)
 
     NUM_EPISODES = cfg.num_episodes
     NUM_STEPS = cfg.num_steps
