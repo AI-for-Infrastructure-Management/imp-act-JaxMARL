@@ -2,6 +2,8 @@ import time
 import jax
 import jax.numpy as jnp
 import logging
+import numpy as np
+import time
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -70,7 +72,8 @@ def get_policy_humble_heuristic(params):
         # Step 3: Apply condition for repair based on configured threshold
         actions = jnp.where(obs_insp > repair_threshold, 2, actions)
 
-        return actions
+        actions_dict = {f"agent_{i}": actions[i] for i in range(env.num_agents)}
+        return actions_dict
     return policy
 
 def get_budget_prioritized_policy(policy, params):
@@ -82,12 +85,21 @@ def get_budget_prioritized_policy(policy, params):
             - repair_threshold: Observation threshold above which repair action is taken (action 2)
     """
 
+    if params.get("priorization_key") == "random":
+        seed = params.get("random_seed")
+        if params.get("random_seed") == "random":
+            seed = np.random.randint(0, 2**32 - 1)
+        log.info(f"Random seed for budget prioritization: {seed}")
+        prio_key = jax.random.PRNGKey(seed)
+
+
     def prioritized_policy(key, state, obs, env):
         """Policy that inspects at specified intervals and repairs when observation exceeds threshold."""
         road_env = env._env.env
         road_env_state = state.env_state
 
         action = policy(key, state, obs, env)
+        action = jnp.array([action[f"agent_{i}"] for i in range(env.num_agents)])
 
         # Step 4: Prioritize repair actions
         forced_action, forced_repair_mask = road_env._apply_forced_repair_constraint(
@@ -134,6 +146,8 @@ def get_budget_prioritized_policy(policy, params):
                 priorities = road_env.segment_lengths
             elif params["priorization_key"] == "volumes":
                 priorities = road_env.initial_edge_volumes
+            elif params["priorization_key"] == "random":
+                priorities = jax.random.uniform(prio_key, shape=action.shape)
             else:
                 raise ValueError(f"Unknown priorization key: {params['priorization_key']}")
             

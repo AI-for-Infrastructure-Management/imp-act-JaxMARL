@@ -6,11 +6,12 @@ policy_params:
 num_episodes: 10000
 num_steps: 50
 norm_constant: 1e6
-plot_histogram: True
+plot_histogram: False
 double_precision_mode: False
 priorization_params: 
-  priorization_key: "volumes" # Options: "segment_lengths", "costs", "volumes"
+  priorization_key: "random" # Options: "segment_lengths", "costs", "volumes"
   priorization_sign: "positive"
+  random_seed: 29 # Options: "random", integernumber
 
 # Optimization parameters
 optimization:
