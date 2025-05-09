@@ -277,8 +277,8 @@ def evaluate_checkpoint(config_eval):
     env = RoadEnvWorldStateWrapper(env)
     env = LogWrapper(env)
 
-    actor_network, critic_network, loaded_params, rnorm = (
-        load_checkpoint_agent(checkpoint_path, step, vmapped_seed, config)
+    actor_network, critic_network, loaded_params, rnorm = load_checkpoint_agent(
+        checkpoint_path, step, vmapped_seed, config
     )
 
     get_greedy_metrics = make_get_greedy_metrics(

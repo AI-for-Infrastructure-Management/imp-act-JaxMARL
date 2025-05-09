@@ -16,13 +16,10 @@ import hydra
 from omegaconf import OmegaConf
 
 from jaxmarl import make
-from jaxmarl.wrappers.baselines import (
-    LogWrapper,
-    CTRolloutManager,
-    load_params
-)
+from jaxmarl.wrappers.baselines import LogWrapper, CTRolloutManager, load_params
 
 log = logging.getLogger(__name__)
+
 
 class ScannedRNN(nn.Module):
 
@@ -163,12 +160,14 @@ class RunningStats:
     mean: jnp.ndarray
     M2: jnp.ndarray
 
+
 def init_running_stats():
     return RunningStats(
         count=jnp.array(0.0, dtype=jnp.float32),
         mean=jnp.array(0.0, dtype=jnp.float32),
         M2=jnp.array(0.0, dtype=jnp.float32),
     )
+
 
 def update_running_stats(stats: RunningStats, x: jnp.ndarray) -> RunningStats:
     x = x.astype(jnp.float32)
@@ -187,27 +186,30 @@ def update_running_stats(stats: RunningStats, x: jnp.ndarray) -> RunningStats:
     )
     return RunningStats(count=new_count, mean=new_mean, M2=new_M2)
 
+
 def get_std(stats: RunningStats) -> jnp.ndarray:
     return jnp.sqrt(stats.M2 / (stats.count + 1e-8))
+
 
 def env_from_config(config):
     env = make(config["ENV_NAME"], **config["ENV_KWARGS"])
     env = LogWrapper(env)
     return env, config["ENV_NAME"]
 
+
 def load_checkpoint_agent(checkpoint_path, step, vmapped_seed, config):
-   
+
     update_step_length = int(np.ceil(np.log10(config["NUM_UPDATES"])))
 
     rng = jax.random.PRNGKey(config["SEED"])
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
 
     load_path = os.path.join(
-                checkpoint_path,
-                'checkpoints',
-                str(rngs[vmapped_seed][0].item()),
-                f'checkpoint_{step:0{update_step_length}}.safetensors',
-            )
+        checkpoint_path,
+        "checkpoints",
+        str(rngs[vmapped_seed][0].item()),
+        f"checkpoint_{step:0{update_step_length}}.safetensors",
+    )
 
     loaded_params = load_params(load_path)
 
@@ -253,53 +255,54 @@ def make_get_greedy_metrics(train_config, test_num_envs, test_num_steps):
         q_vals = q_vals - (unavail_actions * 1e10)
         return jnp.argmax(q_vals, axis=-1)
 
-    def get_greedy_metrics(rng, loaded_params): 
-            params = loaded_params["params"]['agent']  
-            def _greedy_env_step(step_state, unused):
-                params, env_state, last_obs, last_dones, hstate, rng = step_state
-                rng, key_s = jax.random.split(rng)
-                _obs = batchify(last_obs)[:, np.newaxis]
-                _dones = batchify(last_dones)[:, np.newaxis]
-                hstate, q_vals = jax.vmap(network.apply, in_axes=(None, 0, 0, 0))(
-                    params,
-                    hstate,
-                    _obs,
-                    _dones,
-                )
-                q_vals = q_vals.squeeze(axis=1)
-                valid_actions = env.get_valid_actions(env_state.env_state)
-                actions = get_greedy_actions(q_vals, batchify(valid_actions))
-                actions = unbatchify(actions)
-                obs, env_state, rewards, dones, infos = env.batch_step(
-                    key_s, env_state, actions
-                )
-                step_state = (params, env_state, obs, dones, hstate, rng)
-                return step_state, (rewards, dones, infos)
+    def get_greedy_metrics(rng, loaded_params):
+        params = loaded_params["params"]["agent"]
 
-            rng, _rng = jax.random.split(rng)
-            init_obs, env_state = env.batch_reset(_rng)
-            init_dones = {
-                agent: jnp.zeros((test_num_envs), dtype=bool)
-                for agent in env.agents + ["__all__"]
-            }
-            rng, _rng = jax.random.split(rng)
-            hstate = ScannedRNN.initialize_carry(
-                train_config["HIDDEN_SIZE"], len(env.agents), test_num_envs
-            )  # (n_agents*n_envs, hs_size)
-            step_state = (
+        def _greedy_env_step(step_state, unused):
+            params, env_state, last_obs, last_dones, hstate, rng = step_state
+            rng, key_s = jax.random.split(rng)
+            _obs = batchify(last_obs)[:, np.newaxis]
+            _dones = batchify(last_dones)[:, np.newaxis]
+            hstate, q_vals = jax.vmap(network.apply, in_axes=(None, 0, 0, 0))(
                 params,
-                env_state,
-                init_obs,
-                init_dones,
                 hstate,
-                _rng,
+                _obs,
+                _dones,
             )
-            step_state, (rewards, dones, infos) = jax.lax.scan(
-                _greedy_env_step, step_state, None, test_num_steps
+            q_vals = q_vals.squeeze(axis=1)
+            valid_actions = env.get_valid_actions(env_state.env_state)
+            actions = get_greedy_actions(q_vals, batchify(valid_actions))
+            actions = unbatchify(actions)
+            obs, env_state, rewards, dones, infos = env.batch_step(
+                key_s, env_state, actions
             )
+            step_state = (params, env_state, obs, dones, hstate, rng)
+            return step_state, (rewards, dones, infos)
 
-            return infos
-    
+        rng, _rng = jax.random.split(rng)
+        init_obs, env_state = env.batch_reset(_rng)
+        init_dones = {
+            agent: jnp.zeros((test_num_envs), dtype=bool)
+            for agent in env.agents + ["__all__"]
+        }
+        rng, _rng = jax.random.split(rng)
+        hstate = ScannedRNN.initialize_carry(
+            train_config["HIDDEN_SIZE"], len(env.agents), test_num_envs
+        )  # (n_agents*n_envs, hs_size)
+        step_state = (
+            params,
+            env_state,
+            init_obs,
+            init_dones,
+            hstate,
+            _rng,
+        )
+        step_state, (rewards, dones, infos) = jax.lax.scan(
+            _greedy_env_step, step_state, None, test_num_steps
+        )
+
+        return infos
+
     return get_greedy_metrics
 
 
@@ -315,11 +318,15 @@ def evaluate_checkpoint(config_eval):
 
     env, env_name = env_from_config(copy.deepcopy(config))
 
-    env = CTRolloutManager(env, batch_size=config_eval["TEST_NUM_ENVS"], preprocess_obs=False)
+    env = CTRolloutManager(
+        env, batch_size=config_eval["TEST_NUM_ENVS"], preprocess_obs=False
+    )
 
     config["MAX_ACTION_SPACE"] = env.max_action_space
-    
-    loaded_params, rnorm, network, mixer = load_checkpoint_agent(checkpoint_path, step, vmapped_seed, config)
+
+    loaded_params, rnorm, network, mixer = load_checkpoint_agent(
+        checkpoint_path, step, vmapped_seed, config
+    )
 
     get_greedy_metrics = make_get_greedy_metrics(
         config, config_eval["TEST_NUM_ENVS"], config_eval["TEST_NUM_STEPS"]
@@ -327,7 +334,7 @@ def evaluate_checkpoint(config_eval):
 
     rng, _rng = jax.random.split(rng)
     infos = get_greedy_metrics(_rng, loaded_params)
-    
+
     metrics = jax.tree.map(
         lambda x: jnp.nanmean(
             jnp.where(
@@ -339,31 +346,37 @@ def evaluate_checkpoint(config_eval):
         infos,
     )
     metrics["episodes"] = config_eval["TEST_NUM_ENVS"]
-    
-    log.info(f"Evaluation metrics for checkpoint at step {step} with {config_eval['TEST_NUM_ENVS']} envs:")
+
+    log.info(
+        f"Evaluation metrics for checkpoint at step {step} with {config_eval['TEST_NUM_ENVS']} envs:"
+    )
     log.info(f"  Environment: {env_name}")
     for k, v in metrics.items():
         log.info(f"  {k}: {float(v)}")
-    
+
     return metrics
-    
-@hydra.main(version_base=None, config_path="./config", config_name="eval_qmix_rnn_road_env")
+
+
+@hydra.main(
+    version_base=None, config_path="./config", config_name="eval_qmix_rnn_road_env"
+)
 def main(config):
     config = OmegaConf.to_container(config)
-    
+
     print("Config:")
     print(OmegaConf.to_yaml(config))
-    
+
     metrics = evaluate_checkpoint(config)
 
     # Save metrics to a file
     output_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-    
+
     metrics_file_path = os.path.join(output_dir, "metrics.yaml")
-    with open(metrics_file_path, 'w') as f:
+    with open(metrics_file_path, "w") as f:
         yaml.dump({k: float(v) for k, v in metrics.items()}, f)
 
     return metrics
+
 
 if __name__ == "__main__":
     main()
