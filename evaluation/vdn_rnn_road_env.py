@@ -120,8 +120,10 @@ def get_std(stats: RunningStats) -> jnp.ndarray:
     return jnp.sqrt(stats.M2 / (stats.count + 1e-8))
 
 
-def env_from_config(config):
-    env = make(config["ENV_NAME"], **config["ENV_KWARGS"])
+def env_from_config(config, record_rollout=False):
+    env = make(
+        config["ENV_NAME"], **config["ENV_KWARGS"], record_rollout=record_rollout
+    )
     env = LogWrapper(env)
     return env, config["ENV_NAME"]
 
@@ -230,6 +232,87 @@ def make_get_greedy_metrics(train_config, test_num_envs, test_num_steps):
         return infos
 
     return get_greedy_metrics
+
+
+def make_get_rollout_data(train_config, test_num_envs):
+
+    env, _ = env_from_config(copy.deepcopy(train_config), record_rollout=True)
+    env = CTRolloutManager(env, batch_size=test_num_envs, preprocess_obs=False)
+
+    network = RNNQNetwork(
+        action_dim=env.max_action_space,
+        hidden_dim=train_config["HIDDEN_SIZE"],
+    )
+
+    def batchify(x: dict):
+        return jnp.stack([x[agent] for agent in env.agents], axis=0)
+
+    def unbatchify(x: jnp.ndarray):
+        return {agent: x[i] for i, agent in enumerate(env.agents)}
+
+    def get_greedy_actions(q_vals, valid_actions):
+        unavail_actions = 1 - valid_actions
+        q_vals = q_vals - (unavail_actions * 1e10)
+        return jnp.argmax(q_vals, axis=-1)
+
+    def get_rollout_data(rng, loaded_params):
+        params = loaded_params["params"]
+
+        def _greedy_env_step(step_state, unused):
+            params, env_state, last_obs, last_dones, hstate, rng = step_state
+            rng, key_s = jax.random.split(rng)
+            _obs = batchify(last_obs)[:, np.newaxis]
+            _dones = batchify(last_dones)[:, np.newaxis]
+            hstate, q_vals = jax.vmap(network.apply, in_axes=(None, 0, 0, 0))(
+                params,
+                hstate,
+                _obs,
+                _dones,
+            )
+            q_vals = q_vals.squeeze(axis=1)
+            valid_actions = env.get_valid_actions(env_state.env_state)
+            actions = get_greedy_actions(q_vals, batchify(valid_actions))
+
+            # actions = jax.tree.map(lambda x: jnp.full_like(x, 2), actions)
+            # actions = jax.tree.map(lambda x: jnp.zeros_like(x), actions)
+            actions = unbatchify(actions)
+            obs, env_state, rewards, dones, infos = env.batch_step(
+                key_s, env_state, actions
+            )
+            step_state = (params, env_state, obs, dones, hstate, rng)
+            return step_state, (env_state, actions, rewards, infos)
+
+        rng, _rng = jax.random.split(rng)
+        init_obs, env_state = env.batch_reset(_rng)
+        init_dones = {
+            agent: jnp.zeros((test_num_envs), dtype=bool)
+            for agent in env.agents + ["__all__"]
+        }
+        rng, _rng = jax.random.split(rng)
+        hstate = ScannedRNN.initialize_carry(
+            train_config["HIDDEN_SIZE"], len(env.agents), test_num_envs
+        )  # (n_agents*n_envs, hs_size)
+        step_state = (
+            params,
+            env_state,
+            init_obs,
+            init_dones,
+            hstate,
+            _rng,
+        )
+        initial_env_state = env_state
+
+        #! NOTE:
+        # 1. Rollout is limited to max_timesteps
+        # 2. To include last step, auto reset is disabled, which would
+        # otherwise reset the env when done
+        step_state, (env_state, env_act, rewards, infos) = jax.lax.scan(
+            _greedy_env_step, step_state, None, env.env.max_timesteps
+        )
+
+        return initial_env_state, env_state, env_act, rewards, infos
+
+    return get_rollout_data
 
 
 def evaluate_checkpoint(config_eval):
