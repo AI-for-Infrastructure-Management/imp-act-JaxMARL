@@ -1,12 +1,3 @@
-"""
-Download the inference results if not already downloaded.
-
-# download the inference results
-``` bash
-!wget "https://surfdrive.surf.nl/files/index.php/s/G8XWW8On5MWhtCk/download?path=%2FInference&files=inference_results_ToyExample-v2_Cologne-v1_CologneBonnDusseldorf-v1.csv" -qO inference_results.csv
-```
-"""
-
 import copy
 import os
 import pandas as pd
