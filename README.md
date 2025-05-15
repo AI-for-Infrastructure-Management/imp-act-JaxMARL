@@ -36,7 +36,7 @@ pip install -e ".[algs]"
 
 - Install dependencies for imp-act
 ```bash
-cd imp-act && git checkout 99-updating-the-jax-implementation
+cd imp-act && git checkout main
 poetry install --with dev,vis,jax
 ```
 <details>
