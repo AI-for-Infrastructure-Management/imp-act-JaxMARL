@@ -23,5 +23,5 @@ parameters:
       - 3530972771
       - 4165291849
 
-program: getting-started/ippo_rnn_road_env.py
+program: experiments/ippo_rnn_road_env.py
 project: jaxMARL-ToyExample-v2-final

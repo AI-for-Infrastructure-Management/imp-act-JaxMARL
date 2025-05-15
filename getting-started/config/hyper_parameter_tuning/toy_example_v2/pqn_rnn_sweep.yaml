@@ -70,5 +70,5 @@ parameters:
           capacity: false
         map_name: ToyExample-v2
 
-program: getting-started/pqn_vdn_rnn_road_env.py
+program: experiments/pqn_vdn_rnn_road_env.py
 project: jaxMARL-ToyExample-v2

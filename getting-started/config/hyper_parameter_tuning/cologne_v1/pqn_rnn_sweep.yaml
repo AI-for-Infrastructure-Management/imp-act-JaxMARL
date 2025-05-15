@@ -70,5 +70,5 @@ parameters:
           capacity: false
         map_name: Cologne-v1
 
-program: getting-started/pqn_vdn_rnn_road_env.py
+program: experiments/pqn_vdn_rnn_road_env.py
 project: jaxMARL-Cologne-v1

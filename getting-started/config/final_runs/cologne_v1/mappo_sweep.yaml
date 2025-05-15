@@ -23,5 +23,5 @@ parameters:
       - 1950933211
       - 3846780909
 
-program: getting-started/mappo_rnn_road_env.py
+program: experiments/mappo_rnn_road_env.py
 project: jaxMARL-Cologne-v1-final

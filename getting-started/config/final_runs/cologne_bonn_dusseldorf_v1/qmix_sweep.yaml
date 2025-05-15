@@ -23,5 +23,5 @@ parameters:
       - 4061526404
       - 1033305736
 
-program: getting-started/qmix_rnn_road_env.py
+program: experiments/qmix_rnn_road_env.py
 project: jaxMARL-CologneBonnDusseldorf-v1-final

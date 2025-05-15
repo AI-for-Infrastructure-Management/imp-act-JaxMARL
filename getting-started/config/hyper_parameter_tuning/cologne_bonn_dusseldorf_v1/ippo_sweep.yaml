@@ -63,5 +63,5 @@ parameters:
           capacity: false
         map_name: CologneBonnDusseldorf-v1
 
-program: getting-started/ippo_rnn_road_env.py
+program: experiments/ippo_rnn_road_env.py
 project: jaxMARL-CologneBonnDusseldorf-v1

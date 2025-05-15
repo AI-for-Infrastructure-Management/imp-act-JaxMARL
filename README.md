@@ -76,6 +76,6 @@ cd imp-act-JaxMARL && conda activate impact-jaxmarl-env
 ### 4. Run the example script
 ```bash
 cd ..
-python getting-started/example_mpe.py
-python getting-started/example_road_env.py
+python experiments/example_mpe.py
+python experiments/example_road_env.py
 ```
