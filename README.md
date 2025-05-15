@@ -79,3 +79,8 @@ cd ..
 python experiments/example_mpe.py
 python experiments/example_road_env.py
 ```
+
+# Licence Disclaimer
+This file was modified from the original JaxMARL repository in the process of creating the imp-act adaption of JaxMARL. The original repository can be found at [JaxMARL](https://github.com/FLAIROx/JaxMARL). 
+
+It is used under the Apache License 2.0. The original license can be found at [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) in addition to the licence file in this repository. [JaxMARL License](LICENSE).

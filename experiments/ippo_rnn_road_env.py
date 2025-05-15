@@ -1,7 +1,9 @@
 """
-Based on PureJaxRL Implementation of PPO
+This file was adapted from the original in the process of creating the imp-act adaption of JaxMARL under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
+Original file: baselines/IPPO/ippo_rnn_smax.py
 
-Adapted from: baselines/IPPO/ippo_rnn_smax.py
+[ORIGINAL NOTICE]
+Based on PureJaxRL Implementation of PPO
 """
 
 import os

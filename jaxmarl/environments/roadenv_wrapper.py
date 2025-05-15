@@ -1,7 +1,7 @@
 """
-Abstract base class for multi agent gym environments with JAX
-Based on the Gymnax and PettingZoo APIs
-
+JaxMARL Road Environment Wrapper
+   This file was adapted from the original in the process of creating the imp-act adaption of JaxMARL under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
+   Original file: jaxmarl/environments/multi_agent_env.py
 """
 
 import jax

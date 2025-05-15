@@ -1,3 +1,7 @@
+"""
+This file contains code adapted from the original in the process of creating the imp-act adaption of JaxMARL under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
+Original file: baselines/MAPPO/mappo_rnn_mpe.py
+"""
 import os
 import logging
 import yaml

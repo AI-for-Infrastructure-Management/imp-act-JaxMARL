@@ -1,4 +1,8 @@
 """
+This file was adapted from the original in the process of creating the imp-act adaption of JaxMARL under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
+Original file: baselines/MAPPO/mappo_rnn_mpe.py
+
+[ORIGINAL NOTICE]
 Based on PureJaxRL Implementation of IPPO, with changes to give a centralised critic.
 
 Adapted from: baselines/MAPPO/mappo_rnn_smax.py
