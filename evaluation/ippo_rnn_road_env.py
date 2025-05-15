@@ -207,6 +207,80 @@ def make_get_greedy_metrics(train_config, test_num_envs, test_num_steps):
     return get_greedy_metrics
 
 
+def make_get_rollout_data(train_config, test_num_envs):
+    """Get rollout data for the given environment and network.
+
+    #! NOTE:
+    # 1. Rollout is limited to max_timesteps
+    # 2. To include last step, auto reset is disabled, which would
+    # otherwise reset the env when done
+    """
+
+    env = jaxmarl.make(
+        train_config["ENV_NAME"], **train_config["ENV_KWARGS"], record_rollout=True
+    )
+    env = LogWrapper(env)
+
+    network = ActorCriticRNN(env.action_space(env.agents[0]).n, config=train_config)
+
+    def get_rollout_data(rng, loaded_params):
+
+        params = loaded_params["params"]
+
+        test_num_actors = test_num_envs * env.num_agents
+
+        def _greedy_env_step(step_state, unused):
+            env_state, last_obs, last_done, hstate, rng = step_state
+
+            # SELECT ACTION
+            rng, _rng = jax.random.split(rng)
+            obs_batch = batchify(last_obs, env.agents, test_num_actors)
+            ac_in = (obs_batch[np.newaxis, :], last_done[np.newaxis, :])
+            hstate, pi, _ = network.apply(params, hstate, ac_in)
+            action = pi.sample(seed=_rng)
+            env_act = unbatchify(action, env.agents, test_num_envs, env.num_agents)
+            env_act = {k: v.squeeze() for k, v in env_act.items()}
+
+            # STEP ENV
+            rng, _rng = jax.random.split(rng)
+            rng_step = jax.random.split(_rng, test_num_envs)
+            obsv, env_state, rewards, dones, infos = jax.vmap(
+                env.step, in_axes=(0, 0, 0)
+            )(rng_step, env_state, env_act)
+            done_batch = batchify(dones, env.agents, test_num_actors).squeeze()
+
+            step_state = (env_state, obsv, done_batch, hstate, rng)
+            return step_state, (env_state, env_act, rewards, infos)
+
+        rng, _rng = jax.random.split(rng)
+        reset_rng = jax.random.split(_rng, test_num_envs)
+        init_obs, env_state = jax.vmap(env.reset, in_axes=(0,))(reset_rng)
+        init_hstate = ScannedRNN.initialize_carry(
+            test_num_actors, train_config["GRU_HIDDEN_DIM"]
+        )
+        done_batch = jnp.zeros((test_num_actors,), dtype=jnp.bool_)
+        step_state = (
+            env_state,
+            init_obs,
+            done_batch,
+            init_hstate,
+            rng,
+        )
+        initial_env_state = env_state
+
+        #! NOTE:
+        # 1. Rollout is limited to max_timesteps
+        # 2. To include last step, auto reset is disabled, which would
+        # otherwise reset the env when done
+        step_state, (env_state, env_act, rewards, infos) = jax.lax.scan(
+            _greedy_env_step, step_state, None, env.env.max_timesteps
+        )
+
+        return initial_env_state, env_state, env_act, rewards, infos
+
+    return get_rollout_data
+
+
 def evaluate_checkpoint(config_eval):
     rng = jax.random.PRNGKey(config_eval.get("SEED"))
     checkpoint_path = config_eval["CHECKPOINT_PATH"]
@@ -240,7 +314,6 @@ def evaluate_checkpoint(config_eval):
         infos,
     )
     metrics["episodes"] = config_eval["TEST_NUM_ENVS"]
-
 
     log.info(
         f"Evaluation metrics for checkpoint at step {step} with {config_eval['TEST_NUM_ENVS']} envs:"

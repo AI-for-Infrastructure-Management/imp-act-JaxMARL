@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -5,6 +6,37 @@ import matplotlib.patches as patches
 
 
 class RolloutPlotter:
+    """
+    This function returns a template to fill the episode data.
+    The plotting functions use this stencil to create the data for plotting.
+    (This is a replacement for the recorder class in NumPy environment)
+
+    N: number of components
+    T: max timesteps
+    S: number of damage states
+    E: number of edges
+
+    # stencil for the plotting data
+    plot_data = {
+        "edge_states": [],  #! shape: (T+1, N)
+        "edge_observations": [],  #! shape: (T+1, N)
+        "edge_beliefs": [],  #! shape: (T+1, S, N)
+        "action": [],  # shape: (T, N)
+        "applied_actions": [],  # shape: (T, N)
+        "total_travel_time": [],  # shape: (T,)
+        "travel_times": [],  # shape: (T, E)
+        "reward": [],  # shape: (T,)
+        "travel_time_reward": [],  # shape: (T,)
+        "maintenance_reward": [],  # shape: (T,)
+        "terminal_reward": [],  # shape: (T,)
+        "budget_remaining": [],  #! shape: (T+1,)
+        "budget_constraints_applied": [],  # shape: (T,)
+        "forced_replace_constraint_applied": [],  # shape: (T,)
+        "traffic_volumes": [],  # shape: (T, E)
+        "episode_cost": 0,
+    }
+    """
+
     def __init__(self, env):
         self.env = env.env
         self.num_components = env.num_agents
@@ -14,61 +46,18 @@ class RolloutPlotter:
         self.base_total_travel_time = env.env.base_total_travel_time
         self.initial_edge_volumes = None
 
-    def get_episode_data_stencil(self):
-        """
-        This function returns a template to fill the episode data.
-        The plotting functions use this stencil to create the data for plotting.
-        (This is a replacement for the recorder class in NumPy environment)
+    def _plot_deterioration(
+        self, plot_data, show_proposed_actions=True, save_kwargs=None
+    ):
 
-        N: number of components
-        T: max timesteps
-        S: number of damage states
-        E: number of edges
-        """
-
-        # stencil for the plotting data
-        plot_data = {
-            "time_step": np.arange(self.max_timesteps + 1),  #! shape: (T+1,)
-            "edge_states": [],  #! shape: (T+1, N)
-            "edge_observations": [],  #! shape: (T+1, N)
-            "edge_beliefs": [],  #! shape: (T+1, S, N)
-            "action": [],  # shape: (T, N)
-            "applied_actions": [],  # shape: (T, N)
-            "component_failures": np.zeros(
-                (self.max_timesteps + 1, self.num_components)
-            ),
-            "total_travel_time": [],  # shape: (T,)
-            "travel_times": [],  # shape: (T, E)
-            "reward": [],  # shape: (T,)
-            "travel_time_reward": [],  # shape: (T,)
-            "maintenance_reward": [],  # shape: (T,)
-            "terminal_reward": [],  # shape: (T,)
-            "budget_remaining": [],  #! shape: (T+1,)
-            "budget_constraints_applied": [],  # shape: (T,)
-            "forced_replace_constraint_applied": [],  # shape: (T,)
-            "traffic_volumes": [],  # shape: (T, E)
-            "episode_cost": 0,
-        }
-
-        return plot_data
-
-    def _preprocess_episode_data(self, episode_data):
-
-        for key in episode_data.keys():
-            episode_data[key] = np.array(episode_data[key]).squeeze()
-
-        # compute the time step at which components failed
-        for t in range(self.max_timesteps + 1):
-            # if damage state is self.num_damage_states, then component has failed
-            episode_data["component_failures"][t, :] = episode_data["edge_states"][
-                t, :
-            ] == (self.num_damage_states - 1)
-
-        return episode_data
-
-    def _plot_deterioration(self, plot_data, save_kwargs=None):
-
-        fig, _ax = plt.subplots(6, 2, figsize=(14, 10), sharex=True, sharey=True)
+        nrows = math.ceil(self.num_components / 2)
+        fig_width = 14
+        fig_height = (
+            0.75 * self.num_components
+        )  # Adjust the height to ensure good spacing
+        fig, _ax = plt.subplots(
+            nrows, 2, figsize=(fig_width, fig_height), sharex=True, sharey=True
+        )
 
         # ticks and labels: actions
         time_horizon_ticks = np.arange(0, self.max_timesteps + 1, 10)
@@ -83,12 +72,22 @@ class RolloutPlotter:
         action_colors = ["gray", "orange", "blue", "dodgerblue", "darkviolet"]
         action_markersize = 5
 
+        # compute components failure timepoints
+        plot_data["component_failures"] = np.zeros(
+            (self.max_timesteps + 1, self.num_components)
+        )
+        for t in range(self.max_timesteps + 1):
+            # if damage state is num_damage_states-1, then component has failed
+            plot_data["component_failures"][t, :] = plot_data["edge_states"][t, :] == (
+                self.num_damage_states - 1
+            )
+
         for c in range(self.num_components):
             ax = _ax[c // 2, c % 2]
 
             # state
             (h_true_state,) = ax.plot(
-                plot_data["time_step"],
+                plot_data["timesteps"],
                 plot_data["edge_states"][:, c],
                 "-",
                 label="true state",
@@ -99,7 +98,7 @@ class RolloutPlotter:
 
             # observation
             (h_obs,) = ax.plot(
-                plot_data["time_step"],
+                plot_data["timesteps"],
                 plot_data["edge_observations"][:, c],
                 "-o",
                 label="observation",
@@ -110,7 +109,7 @@ class RolloutPlotter:
 
             # belief
             ax.pcolormesh(
-                plot_data["time_step"],
+                plot_data["timesteps"],
                 np.arange(self.num_damage_states),
                 plot_data["edge_beliefs"][:, c, :].T,
                 shading="nearest",
@@ -127,9 +126,9 @@ class RolloutPlotter:
                     ax.axvline(t, color="red", linestyle="--", alpha=0.5)
 
             # Highlight the last timestep with hatching
-            last_timestep_start = plot_data["time_step"][-1] - 0.5
+            last_timestep_start = plot_data["timesteps"][-1] - 0.5
             last_timestep_width = (
-                plot_data["time_step"][-1] - plot_data["time_step"][-2]
+                plot_data["timesteps"][-1] - plot_data["timesteps"][-2]
             )
             rect = patches.Rectangle(
                 (last_timestep_start, -0.5),  # Lower left corner of the rectangle
@@ -145,6 +144,7 @@ class RolloutPlotter:
 
             ## Plot agent actions
             for a in range(self.num_component_actions):
+                # applied actions
                 _x = np.where(plot_data["applied_actions"][:, c] == a)
                 ax.plot(
                     _x,
@@ -154,6 +154,18 @@ class RolloutPlotter:
                     label=action_labels[a],
                     color=action_colors[a],
                 )
+
+                if show_proposed_actions:
+                    # proposed actions
+                    _x = np.where(plot_data["action"][:, c] == a)
+                    ax.plot(
+                        _x,
+                        3,
+                        action_markers[a],
+                        markersize=action_markersize,
+                        color=action_colors[a],
+                        alpha=0.3,
+                    )
 
             ax.set_xlim([-0.5, self.max_timesteps + 0.5])
             ax.set_ylim([-0.5, self.num_damage_states - 0.5])
@@ -192,11 +204,11 @@ class RolloutPlotter:
         fig.legend(
             handles=legend_handles,
             loc="lower center",
-            bbox_to_anchor=(0.5, -0.08),
+            bbox_to_anchor=(0.5, -0.01),
             ncol=4,
         )
 
-        fig.suptitle("Deterioration Process", fontsize=14, weight="bold")
+        fig.suptitle("Deterioration Process", fontsize=14, weight="bold", y=1.01)
         fig.tight_layout()
         plt.show()
 
@@ -205,7 +217,7 @@ class RolloutPlotter:
 
     def _plot_budget(self, plot_data, save_kwargs=None):
 
-        time = plot_data["time_step"]
+        time = plot_data["timesteps"]
 
         fig, ax = plt.subplots(1, 1, figsize=(8, 4), sharex=True)
 
@@ -214,7 +226,7 @@ class RolloutPlotter:
 
         ax.plot(time, percent_used, "-o", color="blue", alpha=0.5)
 
-        for t in plot_data["time_step"][:-1]:
+        for t in plot_data["timesteps"][:-1]:
             # draw vertical lines for budget renewals
             if t % self.env.budget_renewal_interval == 0:
                 ax.axvline(t, color="green", linestyle="--", alpha=0.6)
@@ -250,7 +262,7 @@ class RolloutPlotter:
 
     def _plot_traffic_volume_and_travel_times(self, plot_data, save_kwargs=None):
 
-        time = plot_data["time_step"][:-1]
+        time = plot_data["timesteps"][:-1]
 
         fig, _ax = plt.subplots(2, 1, figsize=(12, 5), sharex=True)
 
@@ -299,7 +311,7 @@ class RolloutPlotter:
 
     def _plot_travel_time_and_rewards(self, plot_data, save_kwargs=None):
 
-        time = plot_data["time_step"][:-1]
+        time = plot_data["timesteps"][:-1]
 
         fig, _ax = plt.subplots(1, 3, figsize=(18, 5))
 
@@ -367,7 +379,7 @@ class RolloutPlotter:
             fig.savefig(**save_kwargs)
 
 
-def plot_action_stats(action_stats_data):
+def plot_action_stats(action_stats_data, save_kwargs=None):
     """
     Plot the action statistics for each agent.
 
@@ -381,7 +393,10 @@ def plot_action_stats(action_stats_data):
 
     NUM_EPISODES, NUM_TIMESTEPS, NUM_AGENTS = action_stats_data.shape
 
-    fig, _ax = plt.subplots(6, 2, figsize=(10, 12), sharex=True, sharey=True)
+    nrows = math.ceil(NUM_AGENTS / 2)
+    fig, _ax = plt.subplots(
+        nrows, 2, figsize=(10, NUM_AGENTS * 1), sharex=True, sharey=True
+    )
 
     # make bins so that the histogram markers align with the action space
     _bins = range(
@@ -398,6 +413,7 @@ def plot_action_stats(action_stats_data):
             align="left",
             rwidth=0.8,
             orientation="horizontal",
+            color="dodgerblue",
         )
         # put text on top of the bars
         for i in range(len(_bins) - 1):
@@ -406,7 +422,7 @@ def plot_action_stats(action_stats_data):
             ax.text(
                 _density,
                 _bins[i],
-                f"{_density:.2f}",
+                f"{_density:.6f}",
                 ha="left",
                 va="center",
                 fontsize=10,
@@ -433,3 +449,6 @@ def plot_action_stats(action_stats_data):
     )
     fig.tight_layout()
     plt.show()
+
+    if save_kwargs is not None:
+        fig.savefig(**save_kwargs)
