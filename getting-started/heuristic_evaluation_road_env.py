@@ -185,20 +185,25 @@ def get_budget_prioritized_policy(policy, params):
 def run_rollout(key, env, policy, num_steps):
     """Run a rollout in the environment."""
     def scan_step(carry, _):
-        key, total_reward, last_obs, last_state = carry
+        key, total_reward, last_obs, last_state, episodes = carry
         key, key_act = jax.random.split(key)
         actions = policy(key_act, last_state, last_obs, env)
         key, key_step = jax.random.split(key)
         obs, state, reward, done, infos = env.step(key_step, last_state, actions)
         total_reward = total_reward + reward["__all__"]
-        return (key, total_reward, obs, state), (done["__all__"], infos)
+        episodes = jax.lax.cond( 
+            done["__all__"].any(),
+            lambda: episodes + 1,
+            lambda: episodes,
+        )
+        return (key, total_reward, obs, state, episodes), (done["__all__"], infos)
     
     key, key_reset = jax.random.split(key)
     obs, state = env.reset(key_reset)
     
     key, key_scan = jax.random.split(key)
-    carry, (dones, infos) = jax.lax.scan(scan_step, (key_scan, 0.0, obs, state), None, length=num_steps)
-    _, total_reward, _, _ = carry
+    carry, (dones, infos) = jax.lax.scan(scan_step, (key_scan, 0.0, obs, state, 0), None, length=num_steps)
+    _, total_reward, _, _, episodes = carry
     log_wrapper_return = jnp.nanmean(
         jnp.where(
             infos["returned_episode"],
@@ -206,7 +211,7 @@ def run_rollout(key, env, policy, num_steps):
             jnp.nan,
         )
     )
-    return total_reward, dones.any(), log_wrapper_return
+    return total_reward / episodes, dones.any(), log_wrapper_return
 
 @hydra.main(config_path="config/heuristics", config_name="toy_example_humble_heuristic", version_base=None)
 def main(cfg: DictConfig):
