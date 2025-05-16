@@ -1,4 +1,4 @@
-EVALUATION_PATH: Null
+EVALUATION_PATH: "outputs/CologneBonnDusseldorf-v1/vdn_rnn"
 TEST_NUM_ENVS : 10000
 TEST_NUM_EPISODES: 10000
 VMAPPED_SEED : 0
@@ -7,7 +7,7 @@ REWARD_SCALE : 1e6
 BASE_PATH : Null
 TOP_K_CHECKPOINTS : 10
 
-EVAL_VDN_BA: False
+EVAL_VDN_BA: True
 
 hydra:
   run:

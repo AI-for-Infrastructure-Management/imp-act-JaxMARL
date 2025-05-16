@@ -89,19 +89,37 @@ unzip checkpoints.zip
 ```
 Then, to evaluate a single checkpoint, use the commands in the following sections.
 
+## Evaluating checkpoints by algorithm
+To evaluate a folder containing checkpoints of a single algorithm for one environment, use the following command:
+
+```bash
+python evaluation/evaluate_runs.py --config-path "config/final_run_evaluations/{ENV}/" --config-name "{ALG}"
+```
+
+Where `{ENV}` is the environment you want to run the evaluation for. The options are:
+- `toy_example_v2`
+- `cologne_v1`
+- `cologne_bonn_dusseldorf_v1`
+
+And `{ALG}` is the algorithm you want to run Also budget aware $\text{VDN}_\text{BA}$ is available.
+- `vdn_rnn`
+- `qmix_rnn`
+- `pqn_rnn`
+- `mappo_rnn`
+- `ippo_rnn`
+* `vdn_ba_rnn`
+
+
 ## Evaluating multiple checkpoints
-To evaluate multiple checkpoints, use the following command:
+To evaluate a folder possibly containing multiple algorithms and checkpoints, use the following command:
 
 ```bash
 python evaluation/evaluate_runs.py EVALUATION_PATH="{EVALUATION_PATH}" TEST_NUM_ENVS={TEST_NUM_ENVS}
 ```
-
-Where `{EVALUATION_PATH}` is the path to the directory containing the checkpoint folders.
+Where
+- `{EVALUATION_PATH}` is the path to the folder containing the checkpoints you want to evaluate.
 
 Depending on the available GPU VRAM you can set the amount of parallel environments TEST_NUM_ENVS to reduce the memory usage. The default value is 10000, so all evaluation episodes are run in parallel.
-```bash
-python evaluation/evaluate_runs.py EVALUATION_PATH="{EVALUATION_PATH}" TEST_NUM_ENVS={TEST_NUM_ENVS}
-```
 
 
 ## Evaluating single checkpoints

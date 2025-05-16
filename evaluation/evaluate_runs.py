@@ -16,6 +16,7 @@ from jaxmarl.wrappers.baselines import load_params
 
 import qmix_rnn_road_env
 import vdn_rnn_road_env
+import vdn_ba_rnn_road_env
 import mappo_rnn_road_env
 import ippo_rnn_road_env
 import pqn_rnn_road_env
@@ -31,6 +32,8 @@ def get_greedy_metric_fn(algorithm):
         return qmix_rnn_road_env.make_get_greedy_metrics
     elif algorithm == "vdn_rnn":
         return vdn_rnn_road_env.make_get_greedy_metrics
+    elif algorithm == "vdn_ba_rnn":
+        return vdn_ba_rnn_road_env.make_get_greedy_metrics
     elif algorithm == "mappo_rnn":
         return mappo_rnn_road_env.make_get_greedy_metrics
     elif algorithm == "ippo_rnn":
@@ -108,6 +111,9 @@ def evaluate_checkpoint(path, config):
     checkpoint_path = path / "checkpoints" / f"{rngs[config['VMAPPED_SEED']][0]}"
 
     env = jaxmarl.make(train_config["ENV_NAME"], **train_config["ENV_KWARGS"])
+
+    if config.get("EVAL_VDN_BA",False) and train_config['ALG_NAME'] == "vdn_rnn":
+        train_config['ALG_NAME'] = "vdn_ba_rnn"
 
     make_get_greedy_metrics = get_greedy_metric_fn(train_config['ALG_NAME'])
 
