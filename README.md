@@ -1,13 +1,14 @@
-# Adaptation of JAXMARL for imp-act
+# JaxMARL for IMP-act
+This repository intergrates the [JAXMARL](https://github.com/FLAIROx/JaxMARL) library with [IMP-act](https://github.com/AI-for-Infrastructure-Management/imp-act), a MARL environment that models the interaction between maintenance actions and traffic dynamics in transportation networks under global budget constraints.
 
 ## Installation
 
-### 1. Clone this repository
+### 1. Clone the repositories
 
-To clone the this repository and the imp-act repository, run:
+To clone this repository and the imp-act repository, run:
 ```bash
 git clone https://github.com/AI-for-Infrastructure-Management/imp-act-JaxMARL.git
-cd imp-act-JaxMARL && git checkout imp_act_adaption
+cd imp-act-JaxMARL && git checkout submission
 git clone https://github.com/AI-for-Infrastructure-Management/imp-act.git
 ```
 
@@ -27,7 +28,7 @@ pip install poetry==1.7.1 lockfile==0.12.2
 
 ### 3.Install dependencies 
 
-**Option A: CPU version**
+**Option A: JAX CPU version**
 
 - Install dependencies for JaxMARL using pyproject.toml
 ```bash
@@ -49,7 +50,7 @@ poetry install --with dev,vis,jax
     ```
 </details>
 
-**Option B: GPU version**
+**Option B: JAX GPU version**
 
 To install the GPU version jax, we need to install the `jax[cuda12]` version. 
 In pyproject.toml, remove "jax==0.4.30" and use "jax[cuda12]==0.4.30" for GPU installation
@@ -57,7 +58,8 @@ In pyproject.toml, remove "jax==0.4.30" and use "jax[cuda12]==0.4.30" for GPU in
 ```bash
 pip install -e ".[algs]"
 
-# check JAX GPU (should return somthing like [cuda(id=0)])
+# check JAX GPU installation 
+# (should return somthing like [cuda(id=0)])
 python -c "import jax; print(jax.devices())"
 ```
 
@@ -73,7 +75,21 @@ cd imp-act-JaxMARL && conda activate impact-jaxmarl-env
 ```
 </details>
 
-## Run 
+### 4. Examples
+```bash
+cd ..
+python experiments/example_mpe.py # checks JaxMARL installation
+python experiments/example_road_env.py # checks imp-act + JaxMARL installation
+```
+
+## Docker Image
+Alternatively, you can quickly get started using the pre-built Docker image. You can pull the image from Docker Hub:
+```bash
+docker pull omniscientoctopus/imp-act-jaxmarl
+```
+
+
+## Reproducing Results 
 To reproduce the results in the paper please refer to the [Reproducing_Results.md](Reproducing_Results.md) file.
 
 ## Results
