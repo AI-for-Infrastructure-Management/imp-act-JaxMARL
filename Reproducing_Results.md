@@ -120,7 +120,7 @@ Where
 First, you need to download the pretrained models used for the evaluation. 
 
 All data is made available under the [CC BY 4.0 license](https://creativecommons.org/licenses/by/4.0/).
-The data is available on Hugging Face at [this link](https://huggingface.co/datasets/AI-for-Infrastructure-Management/imp-act-benchmark-results/tree/main).
+The data is available on Hugging Face at [this link](https://huggingface.co/datasets/AI-for-Infrastructure-Management/imp-act-benchmark-results/tree/main). (DOI: 10.57967/hf/5523)
 
 You can use this script to download all data available in the repository:
 ```bash
