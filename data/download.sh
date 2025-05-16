@@ -33,6 +33,25 @@ else
     echo "wandb run data already exists, skipping."
 fi
 
+# Download the evaluation data if it doesn't exist
+if [ ! -f "data/inference_results_ToyExample-v2_Cologne-v1_CologneBonnDusseldorf-v1.csv" ]; then
+    echo "Downloading evaluation data..."
+    wget "https://huggingface.co/datasets/AI-for-Infrastructure-Management/imp-act-benchmark-results/resolve/main/inference_results_ToyExample-v2_Cologne-v1_CologneBonnDusseldorf-v1.csv?download=true" -O data/inference_results_ToyExample-v2_Cologne-v1_CologneBonnDusseldorf-v1.csv
+    echo "Evaluation data downloaded."
+else
+    echo "Evaluation data already exists, skipping."
+fi
+
+# Download the VDN_BA evaluation data if it doesn't exist
+if [ ! -f "data/inference_results_vdn_rnn_ba.csv" ]; then
+    echo "Downloading VDN_BA evaluation data..."
+    wget "https://huggingface.co/datasets/AI-for-Infrastructure-Management/imp-act-benchmark-results/resolve/main/inference_results_vdn_rnn_ba.csv?download=true" -O data/inference_results_vdn_rnn_ba.csv
+    echo "VDN_BA evaluation data downloaded."
+else
+    echo "VDN_BA evaluation data already exists, skipping."
+fi
+
+
 # Models
 # ToyExample-v2
 echo "Checking ToyExample-v2 models..."
