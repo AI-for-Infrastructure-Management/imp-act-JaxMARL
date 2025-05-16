@@ -66,9 +66,9 @@ python -c "import jax; print(jax.devices())"
 <details> 
 <summary>vast.ai GPU instance</summary>
 
-Create a GPU instance on vast.ai using this [link](https://cloud.vast.ai?ref_id=113803&template_id=b48cde0d602acbd9d886c815750df9b6),
+Create a GPU instance on vast.ai using the pre-built docker image `omniscientoctopus/imp-act-jaxmarl` to quickly get started.
 
-It uses the `nvidia/cuda:12.6.2-cudnn-devel-ubuntu22.04` and filters GPUs with CUDA >=12.8. After creating an instance, use the above commands for installation.
+Make sure to filters GPUs with CUDA >=12.8. After creating an instance, can run the examples below to check the installation.
 
 ```bash
 cd imp-act-JaxMARL && conda activate impact-jaxmarl-env
