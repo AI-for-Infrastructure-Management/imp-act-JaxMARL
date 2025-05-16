@@ -26,10 +26,10 @@ SHELL ["/bin/bash", "-c"]
 # Clone repositories
 RUN git clone https://github.com/AI-for-Infrastructure-Management/imp-act-JaxMARL.git && \
     cd imp-act-JaxMARL && \
-    git checkout imp_act_adaption && \
+    git checkout submission && \
     git clone https://github.com/AI-for-Infrastructure-Management/imp-act.git && \
     cd imp-act && \
-    git checkout 99-updating-the-jax-implementation
+    git checkout main
 
 # Create Conda environment (impact-jaxmarl-env)
 RUN conda env create -f imp-act-JaxMARL/conda_environment.yaml
