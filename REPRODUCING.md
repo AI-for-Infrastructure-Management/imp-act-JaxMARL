@@ -41,6 +41,7 @@ Where
 Here are some examples of how to run the algorithms with the same hyperparameters and seeds as used in the paper:
 
 <details>
+<summary> Show Commands </summary>
 
 ```bash
 # VDN algorithm
