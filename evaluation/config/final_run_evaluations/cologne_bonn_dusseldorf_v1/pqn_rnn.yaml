@@ -1,4 +1,4 @@
-EVALUATION_PATH: "outputs/CologneBonnDusseldorf-v1/pqn_rnn"
+EVALUATION_PATH: "data/models/CologneBonnDusseldorf-v1/pqn_rnn"
 TEST_NUM_ENVS : 5000
 TEST_NUM_EPISODES: 10000
 VMAPPED_SEED : 0
@@ -7,7 +7,7 @@ REWARD_SCALE : 1e6
 BASE_PATH : Null
 TOP_K_CHECKPOINTS : 10
 
-RUN_DATA_PATH: "data/final_run_data/"
+RUN_DATA_PATH: "data/wandb_run_data/"
 
 hydra:
   run:

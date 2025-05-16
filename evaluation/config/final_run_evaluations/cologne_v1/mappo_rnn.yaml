@@ -1,4 +1,4 @@
-EVALUATION_PATH: "outputs/Cologne-v1/mappo_rnn"
+EVALUATION_PATH: "data/models/Cologne-v1/mappo_rnn"
 TEST_NUM_ENVS : 10000
 TEST_NUM_EPISODES: 10000
 VMAPPED_SEED : 0

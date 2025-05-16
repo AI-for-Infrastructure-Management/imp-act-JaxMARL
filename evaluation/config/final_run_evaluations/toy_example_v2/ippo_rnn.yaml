@@ -1,4 +1,4 @@
-EVALUATION_PATH: "outputs/ToyExample-v2/ippo_rnn"
+EVALUATION_PATH: "data/models/ToyExample-v2/ippo_rnn"
 TEST_NUM_ENVS : 10000
 TEST_NUM_EPISODES: 10000
 VMAPPED_SEED : 0

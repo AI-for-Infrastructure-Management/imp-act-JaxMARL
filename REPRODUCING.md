@@ -117,10 +117,16 @@ Where
 - and `{SWEEP_ID}` is the ID of the sweep which is created when you run the first command.
 
 # Evaluation of checkpoints
-First, you need to download the pretrained models used for the evaluation. You can do this by running the following command:
+First, you need to download the pretrained models used for the evaluation. 
+
+All data is made available under the [CC BY 4.0 license](https://creativecommons.org/licenses/by/4.0/).
+The data is available on Hugging Face at [this link](https://huggingface.co/datasets/AI-for-Infrastructure-Management/imp-act-benchmark-results/tree/main).
+
+You can use this script to download all data available in the repository:
 ```bash
 ./data/download.sh
 ```
+
 Then, to evaluate checkpoints, use the commands in the following sections.
 
 ## Evaluating checkpoints by algorithm
