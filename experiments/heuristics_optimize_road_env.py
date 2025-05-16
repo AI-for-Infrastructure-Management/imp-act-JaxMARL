@@ -181,14 +181,19 @@ def run_rollout_with_params(key, env, interval, threshold, seed, num_steps, conf
 def run_rollout(key, env, policy, num_steps):
     """Run a single rollout in the environment."""
     def scan_step(carry, _):
-        key, total_reward, last_obs, last_state = carry
+        key, total_reward, last_obs, last_state, episodes = carry
         key, key_act = jax.random.split(key)
         actions = policy(key_act, last_state, last_obs, env)
         key, key_step = jax.random.split(key)
         obs, state, reward, done, infos = env.step(key_step, last_state, actions)
 
         total_reward = total_reward + reward["__all__"]
-        return (key, total_reward, obs, state), (done["__all__"], infos)
+        episodes = jax.lax.cond( 
+            done["__all__"].any(),
+            lambda: episodes + 1,
+            lambda: episodes,
+        )
+        return (key, total_reward, obs, state, episodes), (done["__all__"], infos)
     
     key, key_reset = jax.random.split(key)
     obs, state = env.reset(key_reset)
@@ -196,11 +201,11 @@ def run_rollout(key, env, policy, num_steps):
     key, key_scan = jax.random.split(key)
     carry, (dones, infos) = jax.lax.scan(
         scan_step,
-        (key_scan, 0.0, obs, state),
+        (key_scan, 0.0, obs, state, 0),
         None,
         length=num_steps
     )
-    _, total_reward, _, _ = carry
+    _, total_reward, _, _, episodes = carry
 
     log_wrapper_return = jnp.nanmean(
         jnp.where(
@@ -209,7 +214,7 @@ def run_rollout(key, env, policy, num_steps):
             jnp.nan,
         )
     )
-    return total_reward, dones.any(), log_wrapper_return
+    return total_reward / episodes, dones.any(), log_wrapper_return
 
 
 ################################################################################
@@ -308,14 +313,6 @@ def main(cfg: DictConfig):
 
     rewards, dones, logs = results  # unpack the tuple
 
-    # Now you can handle them separately
-    # mean_rewards = jnp.mean(rewards, axis=1)
-
-    # Separate them out
-    # rewards = results[..., 0]   # shape (num_combos, NUM_EPISODES)
-    # dones   = results[..., 1]   # shape (num_combos, NUM_EPISODES)
-    # logs    = results[..., 2]   # shape (num_combos, NUM_EPISODES)
-
     # Compute mean & std across episodes, for each combo
     mean_rewards = jnp.mean(rewards, axis=1)  # shape (num_combos,)
     std_rewards  = jnp.std(rewards, axis=1)
@@ -341,7 +338,6 @@ def main(cfg: DictConfig):
                 f" and std = {std_rewards[best_idx] / NORM_CONSTANT:.6f}")
 
     # Optionally print out the top few combos
-    # This is a bit more advanced, sorting or partial sorting the combos by mean reward
     sorted_indices = jnp.argsort(-mean_rewards)  # descending
     top5 = sorted_indices[:5]
     log.info(f"Top 5 combos by mean reward:")
