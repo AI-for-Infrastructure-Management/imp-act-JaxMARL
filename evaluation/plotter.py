@@ -411,7 +411,7 @@ def plot_action_stats(action_stats_data, save_kwargs=None):
             bins=_bins,
             density=True,
             align="left",
-            rwidth=0.8,
+            rwidth=0.4,
             orientation="horizontal",
             color="dodgerblue",
         )
