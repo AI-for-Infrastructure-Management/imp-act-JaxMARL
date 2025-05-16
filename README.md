@@ -73,12 +73,8 @@ cd imp-act-JaxMARL && conda activate impact-jaxmarl-env
 ```
 </details>
 
-### 4. Run the example script
-```bash
-cd ..
-python experiments/example_mpe.py
-python experiments/example_road_env.py
-```
+### 4. Run 
+To reproduce the results in the paper please refer to the [REPRODUCING.md](REPRODUCING.md) file.
 
 # Licence Disclaimer
 This file was modified from the original JaxMARL repository in the process of creating the imp-act adaption of JaxMARL. The original repository can be found at [JaxMARL](https://github.com/FLAIROx/JaxMARL). 
