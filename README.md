@@ -74,7 +74,48 @@ cd imp-act-JaxMARL && conda activate impact-jaxmarl-env
 </details>
 
 ## Run 
-To reproduce the results in the paper please refer to the [REPRODUCING.md](REPRODUCING.md) file.
+To reproduce the results in the paper please refer to the [Reproducing_Results.md](Reproducing_Results.md) file.
+
+## Results
+![Figure 3](docs/imgs/imp_act_results.png)
+Normalized best policy returns, for all tested IMP-act environments and MARL algorithms over 10 training seeds. Returns are normalized with respect to the baseline heuristic policy $\text{H}_\text{PS}$.
+
+Best performance per algorithm in terms of expected return, 95% CI, and required VRAM for each environment. The best performance per environment is highlighted in bold, and performances within their 95% CI are marked with *.
+
+### **Toy-Example** ($\text{H}_\text{PS}=-274\text{M}$)
+
+| Algorithm           | $\Delta \bar{R}^{\pi}_0$ | 95% CI             | VRAM (GB) |
+| :------------------ | -----------------------: | :----------------: | -----------: |
+| VDN                 | *+22.09%                 | [21.35, 22.81]   | 0.52         |
+| QMIX                | *+21.37%                 | [20.54, 22.15]   | 1.55         |
+| PQN-VDN             | **+22.72%**                 | [21.98, 23.46]   | 0.16         |
+| MAPPO               | +19.22%                  | [18.38, 20.04]   | 0.85         |
+| IPPO                | +20.54%                  | [19.76, 21.30]   | 1.87         |
+| $\text{VDN}_{\text{BA}}$ | +23.04%                  | [20.69, 25.31]   | --           |
+
+### **Cologne** ($\text{H}_\text{PS}=-8.2\text{B}$)
+
+| Algorithm           | $\Delta \bar{R}^{\pi}_0$ | 95% CI             | VRAM (GB) |
+| :------------------ | -----------------------: | :----------------: | -----------: |
+| VDN                 | **+22.88%** | [22.59, 23.16]   | 5.94         |
+| QMIX                | +21.48%                  | [21.17, 21.80]   | 7.72         |
+| PQN-VDN             | +20.01%                  | [19.70, 20.30]   | 0.77         |
+| MAPPO               | +17.85%                  | [17.51, 18.17]   | 13.13        |
+| IPPO                | +12.62%                  | [12.30, 12.93]   | 1.29         |
+| $\text{VDN}_{\text{BA}}$ | +24.57%                  | [23.67, 25.42]   | --           |
+
+### **CologneBonn-Dusseldorf** ($\text{H}_\text{PS}=-33.1\text{B}$)
+
+| Algorithm           | $\Delta \bar{R}^{\pi}_0$ | 95% CI             | VRAM (GB) |
+| :------------------ | -----------------------: | :----------------: | -----------: |
+| VDN                 | **+24.91%** | [24.71, 25.10]   | 12.09        |
+| QMIX                | +20.19%                  | [19.97, 20.40]   | 10.37        |
+| PQN-VDN             | +21.24%                  | [21.04, 21.45]   | 2.29         |
+| MAPPO               | +3.89%                   | [3.67, 4.10]     | 16.45        |
+| IPPO                | -15.03%                  | [-15.31, -14.75] | 2.14         |
+| $\text{VDN}_{\text{BA}}$ | +25.70%                  | [25.09, 26.29]   | --           |
+
+
 
 # Licence Disclaimer
 This file was modified from the original JaxMARL repository in the process of creating the imp-act adaption of JaxMARL. The original repository can be found at [JaxMARL](https://github.com/FLAIROx/JaxMARL). 
