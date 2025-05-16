@@ -9,6 +9,8 @@ TOP_K_CHECKPOINTS : 10
 
 EVAL_VDN_BA: False
 
+RUN_DATA_PATH: "data/final_run_data/"
+
 hydra:
   run:
     dir: outputs/evaluation/${now:%Y-%m-%d_%H-%M-%S.%f}  # Directory to save evaluation logs

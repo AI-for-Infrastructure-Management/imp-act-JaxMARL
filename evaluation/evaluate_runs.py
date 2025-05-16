@@ -71,6 +71,7 @@ def compute_episode_return_stats(episode_returns):
 
 def evaluate_checkpoint(path, config):
     train_config_path = path / "config.yaml"
+    run_data_path = Path(config.get("RUN_DATA_PATH", "data/final_run_data"))
     train_config = yaml.safe_load(open(train_config_path, "r"))
 
     results_dir = path / "evaluation"
@@ -113,9 +114,9 @@ def evaluate_checkpoint(path, config):
     env = jaxmarl.make(train_config["ENV_NAME"], **train_config["ENV_KWARGS"])
 
     if config.get("EVAL_VDN_BA",False) and train_config['ALG_NAME'] == "vdn_rnn":
-        train_config['ALG_NAME'] = "vdn_ba_rnn"
-
-    make_get_greedy_metrics = get_greedy_metric_fn(train_config['ALG_NAME'])
+        make_get_greedy_metrics = vdn_ba_rnn_road_env.make_get_greedy_metrics
+    else:
+        make_get_greedy_metrics = get_greedy_metric_fn(train_config['ALG_NAME'])
 
     jit_get_greedy_metrics = jax.jit(
         make_get_greedy_metrics(train_config, config['TEST_NUM_ENVS'], config['TEST_NUM_STEPS'])
@@ -126,10 +127,9 @@ def evaluate_checkpoint(path, config):
     top_k = config.get('TOP_K_CHECKPOINTS') or len(all_safetensor_names)
     evaluate_checkpoints = all_safetensor_names
     if top_k < len(all_safetensor_names):
-        
         entity, project, run_id = get_run_from_link(train_config["WANDB_RUN_URL"])
-
-        run_store_path = path / "wandb"
+        sweep_name = f"{train_config['ALG_NAME']}_final_run"
+        run_store_path = run_data_path / f"{project}/{sweep_name}/{run_id}"
 
         if not (run_store_path / "config.yaml").exists():
             log.info(f"Downloading run data for {run_id}...")

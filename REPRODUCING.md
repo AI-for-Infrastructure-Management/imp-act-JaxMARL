@@ -38,7 +38,40 @@ Where
 | 9      | 3530972771    | 1950933211 | 4061526404               |
 | 10     | 4165291849    | 3846780909 | 1033305736               |
 
-    
+Here are some examples of how to run the algorithms with the same hyperparameters and seeds as used in the paper:
+
+<details>
+
+```bash
+# VDN algorithm
+python experiments/vdn_rnn_road_env.py --config-path experiments/final_runs/toy_example_v2/ SEED=2849413441
+python experiments/vdn_rnn_road_env.py --config-path experiments/final_runs/cologne_v1/ SEED=1221700768
+python experiments/vdn_rnn_road_env.py --config-path experiments/final_runs/cologne_bonn_dusseldorf_v1/ SEED=2411725836
+
+# QMIX algorithm
+python experiments/qmix_rnn_road_env.py --config-path experiments/final_runs/toy_example_v2/ SEED=2849413441
+python experiments/qmix_rnn_road_env.py --config-path experiments/final_runs/cologne_v1/ SEED=1221700768
+python experiments/qmix_rnn_road_env.py --config-path experiments/final_runs/cologne_bonn_dusseldorf_v1/ SEED=2411725836
+
+# PQN algorithm
+python experiments/pqn_rnn_road_env.py --config-path experiments/final_runs/toy_example_v2/ SEED=2849413441
+python experiments/pqn_rnn_road_env.py --config-path experiments/final_runs/cologne_v1/ SEED=1221700768
+python experiments/pqn_rnn_road_env.py --config-path experiments/final_runs/cologne_bonn_dusseldorf_v1/ SEED=2411725836
+
+# MAPPO algorithm
+python experiments/mappo_rnn_road_env.py --config-path experiments/final_runs/toy_example_v2/ SEED=2849413441
+python experiments/mappo_rnn_road_env.py --config-path experiments/final_runs/cologne_v1/ SEED=1221700768
+python experiments/mappo_rnn_road_env.py --config-path experiments/final_runs/cologne_bonn_dusseldorf_v1/ SEED=2411725836
+
+# IPPO algorithm
+python experiments/ippo_rnn_road_env.py --config-path experiments/final_runs/toy_example_v2/ SEED=2849413441
+python experiments/ippo_rnn_road_env.py --config-path experiments/final_runs/cologne_v1/ SEED=1221700768
+python experiments/ippo_rnn_road_env.py --config-path experiments/final_runs/cologne_bonn_dusseldorf_v1/ SEED=2411725836
+
+```
+
+</details>
+
 ## Hyperparameter tuning runs
 To run the hyperparameter tuning yourself as described in the paper, use the following commands:
 
