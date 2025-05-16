@@ -61,7 +61,7 @@ Where
 - and `{SWEEP_ID}` is the ID of the sweep which is created when you run the first command.
 
 
-## Evaluation Runs
+## Seeded Training Runs
 To run the evaluation runs, use the following command:
 
 ```bash

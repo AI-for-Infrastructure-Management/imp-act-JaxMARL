@@ -73,7 +73,7 @@ cd imp-act-JaxMARL && conda activate impact-jaxmarl-env
 ```
 </details>
 
-### 4. Run 
+## Run 
 To reproduce the results in the paper please refer to the [REPRODUCING.md](REPRODUCING.md) file.
 
 # Licence Disclaimer
