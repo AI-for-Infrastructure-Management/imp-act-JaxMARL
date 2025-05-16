@@ -116,11 +116,11 @@ Where
 - and `{SWEEP_ID}` is the ID of the sweep which is created when you run the first command.
 
 # Evaluation of checkpoints
+First, you need to download the pretrained models used for the evaluation. You can do this by running the following command:
 ```bash
-wget https://example.com/checkpoints.zip
-unzip checkpoints.zip
+./data/download.sh
 ```
-Then, to evaluate a single checkpoint, use the commands in the following sections.
+Then, to evaluate checkpoints, use the commands in the following sections.
 
 ## Evaluating checkpoints by algorithm
 To evaluate a folder containing checkpoints of a single algorithm for one environment, use the following command:
