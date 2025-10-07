@@ -47,30 +47,57 @@ class RolloutPlotter:
         self.initial_edge_volumes = None
 
     def _plot_deterioration(
-        self, plot_data, show_proposed_actions=True, save_kwargs=None
+        self,
+        plot_data,
+        components_to_show="all",
+        show_proposed_actions=True,
+        save_kwargs=None,
+        fig_width=14,
+        fig_height=None,
     ):
 
-        nrows = math.ceil(self.num_components / 2)
-        fig_width = 14
-        fig_height = (
-            0.75 * self.num_components
-        )  # Adjust the height to ensure good spacing
-        fig, _ax = plt.subplots(
-            nrows, 2, figsize=(fig_width, fig_height), sharex=True, sharey=True
-        )
+        if components_to_show == "all":
+            components_to_show = range(self.num_components)
+        elif isinstance(components_to_show, int):
+            components_to_show = [components_to_show]
+        elif isinstance(components_to_show, list):
+            components_to_show = [int(c) for c in components_to_show]
+            if any(c >= self.num_components for c in components_to_show):
+                raise ValueError(f"components must be less than {self.num_components}")
+        else:
+            raise ValueError(
+                "components must be 'all' or an integer or a list of integers"
+            )
+
+        if len(components_to_show) > 2:
+            nrows = math.ceil(len(components_to_show) / 2)
+            if fig_height is None:
+                fig_height = 0.75 * len(components_to_show)
+            fig, _ax = plt.subplots(
+                nrows, 2, figsize=(fig_width, fig_height), sharex=True, sharey=True
+            )
+            _ax = np.atleast_2d(_ax)
+
+        else:
+            if fig_height is None:
+                fig_height = 2.5
+            fig, _ax = plt.subplots(
+                1, len(components_to_show), figsize=(fig_width, fig_height)
+            )
+            _ax = np.array([_ax])
 
         # ticks and labels: actions
         time_horizon_ticks = np.arange(0, self.max_timesteps + 1, 10)
         action_markers = [".", "s", "<", ">", "^"]
         action_labels = [
-            "do-nothing",
-            "inspect",
-            "minor-repair",
-            "major-repair",
+            "routine inspection",
+            "high-fidelity inspection",
+            "minor repair",
+            "major repair",
             "replace",
         ]
         action_colors = ["gray", "orange", "blue", "dodgerblue", "darkviolet"]
-        action_markersize = 5
+        action_markersize = 7
 
         # compute components failure timepoints
         plot_data["component_failures"] = np.zeros(
@@ -82,13 +109,17 @@ class RolloutPlotter:
                 self.num_damage_states - 1
             )
 
-        for c in range(self.num_components):
-            ax = _ax[c // 2, c % 2]
+        for c, comp in enumerate(components_to_show):
+
+            if len(components_to_show) > 2:
+                ax = _ax[c // 2, c % 2]
+            else:
+                ax = _ax[c]
 
             # state
             (h_true_state,) = ax.plot(
                 plot_data["timesteps"],
-                plot_data["edge_states"][:, c],
+                plot_data["edge_states"][:, comp],
                 "-",
                 label="true state",
                 color="tab:green",
@@ -99,7 +130,7 @@ class RolloutPlotter:
             # observation
             (h_obs,) = ax.plot(
                 plot_data["timesteps"],
-                plot_data["edge_observations"][:, c],
+                plot_data["edge_observations"][:, comp],
                 "-o",
                 label="observation",
                 color="tab:blue",
@@ -111,7 +142,7 @@ class RolloutPlotter:
             ax.pcolormesh(
                 plot_data["timesteps"],
                 np.arange(self.num_damage_states),
-                plot_data["edge_beliefs"][:, c, :].T,
+                plot_data["edge_beliefs"][:, comp, :].T,
                 shading="nearest",
                 cmap="binary",  # _r for reversed
                 alpha=0.2,
@@ -121,8 +152,8 @@ class RolloutPlotter:
             )
 
             # draw vertical lines when component fails
-            if plot_data["component_failures"][:, c].any():
-                for t in np.where(plot_data["component_failures"][:, c])[0]:
+            if plot_data["component_failures"][:, comp].any():
+                for t in np.where(plot_data["component_failures"][:, comp])[0]:
                     ax.axvline(t, color="red", linestyle="--", alpha=0.5)
 
             # Highlight the last timestep with hatching
@@ -145,7 +176,7 @@ class RolloutPlotter:
             ## Plot agent actions
             for a in range(self.num_component_actions):
                 # applied actions
-                _x = np.where(plot_data["applied_actions"][:, c] == a)
+                _x = np.where(plot_data["applied_actions"][:, comp] == a)
                 ax.plot(
                     _x,
                     2,
@@ -157,7 +188,7 @@ class RolloutPlotter:
 
                 if show_proposed_actions:
                     # proposed actions
-                    _x = np.where(plot_data["action"][:, c] == a)
+                    _x = np.where(plot_data["action"][:, comp] == a)
                     ax.plot(
                         _x,
                         3,
@@ -171,9 +202,13 @@ class RolloutPlotter:
             ax.set_ylim([-0.5, self.num_damage_states - 0.5])
             ax.set_xticks(time_horizon_ticks)
             ax.set_yticks(np.arange(self.num_damage_states))
-            ax.set_xlabel("time", fontsize=12)
-            ax.set_ylabel("damage state", fontsize=8)
-            ax.set_title(f"Component {c}", fontsize=12, weight="bold")
+            ax.set_xlabel("timestep", fontsize=12)
+            ax.set_ylabel("damage state", fontsize=10)
+            ax.set_title(
+                f"Deterioration, inspection and maintenance | segment: {comp}",
+                fontsize=12,
+                weight="bold",
+            )
 
             # create legend handles
             legend_handles = []
@@ -200,26 +235,32 @@ class RolloutPlotter:
                 Line2D([], [], color="red", linestyle="--", label="unsafe state")
             ]
 
-        # Move the legend outside the plot
         fig.legend(
             handles=legend_handles,
             loc="lower center",
-            bbox_to_anchor=(0.5, -0.01),
-            ncol=4,
+            bbox_to_anchor=(0.5, -0.17),  # slightly lower anchor for better spacing
+            ncol=7,  # increase columns to prevent crowding
+            # frameon=False,  # cleaner look without box
         )
 
-        fig.suptitle("Deterioration Process", fontsize=14, weight="bold", y=1.01)
+        # fig.suptitle("Deterioration, Inspection and Maintenance", fontsize=14, weight="bold", y=1.01)
         fig.tight_layout()
         plt.show()
 
         if save_kwargs is not None:
             fig.savefig(**save_kwargs)
 
-    def _plot_budget(self, plot_data, save_kwargs=None):
+    def _plot_budget(
+        self,
+        plot_data,
+        save_kwargs=None,
+        fig_width=8,
+        fig_height=4,
+    ):
 
         time = plot_data["timesteps"]
 
-        fig, ax = plt.subplots(1, 1, figsize=(8, 4), sharex=True)
+        fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_height), sharex=True)
 
         percent_remaining = plot_data["budget_remaining"] / self.env.budget_amount * 100
         percent_used = 100 - percent_remaining
@@ -233,12 +274,12 @@ class RolloutPlotter:
 
             # add a cross marker for forced replace constraint
             if plot_data["forced_replace_constraint_applied"][t]:
-                ax.plot(t, 102, "x", color="red")
+                ax.plot(t, 50, "x", color="red")
 
         ax.set_title("Budget Usage", fontsize=12)
         ax.set_ylabel("% budget used", fontsize=12)
         ax.set_ylim([-2, 105])
-        ax.set_yticks(np.arange(0, 101, 10))
+        # ax.set_yticks(np.arange(0, 101, 10))
         ax.set_xlabel("time", fontsize=12)
         ax.set_xlim([-0.5, self.max_timesteps + 0.5])
         ax.set_xticks(np.arange(0, self.max_timesteps + 1, 10))
@@ -247,61 +288,120 @@ class RolloutPlotter:
         custom_lines = [
             Line2D([], [], color="blue", alpha=0.5, label="budget used"),
             Line2D(
-                [], [], color="black", linestyle="--", alpha=0.6, label="budget renewal"
+                [], [], color="green", linestyle="--", alpha=0.6, label="budget renewal"
             ),
             Line2D([], [], color="red", marker="x", label="forced replace constraint"),
         ]
 
         fig.legend(
             handles=custom_lines,
-            # loc="upper left",
-            fontsize=8,
-            # bbox_to_anchor=(1, 0.5),
+            loc="center right",
+            fontsize=10,
+            bbox_to_anchor=(0.42, 0.8),
         )
-        ax.grid(axis="y", linestyle="--", alpha=0.7)
+        ax.grid(alpha=0.7)
 
-    def _plot_traffic_volume_and_travel_times(self, plot_data, save_kwargs=None):
+        if save_kwargs is not None:
+            fig.savefig(**save_kwargs)
+
+    def _plot_traffic_volume_and_travel_times(
+        self, plot_data, components_to_show="all", save_kwargs=None
+    ):
 
         time = plot_data["timesteps"][:-1]
 
         fig, _ax = plt.subplots(2, 1, figsize=(12, 5), sharex=True)
 
         # Define labels for edges
-        labels = [f"edge {i}" for i in range(self.env.graph.ecount())]
+        if components_to_show == "all":
+            components_to_show = range(self.env.graph.ecount())
+        elif isinstance(components_to_show, int):
+            components_to_show = [components_to_show]
+        elif isinstance(components_to_show, list):
+            components_to_show = [int(c) for c in components_to_show]
+            if any(c >= self.env.graph.ecount() for c in components_to_show):
+                raise ValueError(
+                    f"components must be less than {self.env.graph.ecount()}"
+                )
+        else:
+            raise ValueError(
+                "components must be 'all' or an integer or a list of integers"
+            )
 
-        colors = plt.cm.get_cmap("tab10", self.env.graph.ecount())
+        # ticks and labels: actions
+        time_horizon_ticks = np.arange(0, self.max_timesteps + 1, 10)
+        action_markers = [".", "s", "<", ">", "^"]
+        action_labels = [
+            "routine inspection",
+            "high-fidelity inspection",
+            "minor repair",
+            "major repair",
+            "replace",
+        ]
+        action_colors = ["gray", "orange", "blue", "dodgerblue", "darkviolet"]
+        action_markersize = 7
 
-        for i, label in enumerate(labels):
+        labels = [f"edge {i}" for i in components_to_show]
+        colors = plt.cm.get_cmap("tab10", len(components_to_show))
+
+        for c, comp in enumerate(components_to_show):
             _ax[0].plot(
                 time,
-                plot_data["traffic_volumes"][:, i],
-                label=label,
-                color=colors(i),  # Use distinct color for each line
+                plot_data["traffic_volumes"][:, comp],
+                label=labels[c],
+                color=colors(c),  # Use distinct color for each line
                 marker="o",  # Optional: add markers to each line
                 linestyle="-",  # Keep lines solid
                 linewidth=1.5,  # Thicker lines for better visibility
             )
+            ## Plot agent actions
+            ymin, ymax = _ax[0].get_ylim()
+            y_middle = (ymax + ymin) / 2
+            for a in range(self.num_component_actions):
+                # applied actions
+                _x = np.where(plot_data["applied_actions"][:, comp] == a)
+                _ax[0].plot(
+                    _x,
+                    y_middle,
+                    action_markers[a],
+                    markersize=action_markersize,
+                    label=action_labels[a],
+                    color=action_colors[a],
+                )
 
             _ax[1].plot(
                 time,
-                plot_data["travel_times"][:, i],
-                color=colors(i),  # Use distinct color for each line
+                plot_data["travel_times"][:, comp],
+                color=colors(c),  # Use distinct color for each line
                 marker="x",  # Optional: add markers to each line
                 linestyle="-",  # Keep lines solid
                 linewidth=1.5,  # Thicker lines for better visibility
             )
+            ## Plot agent actions
+            ymin, ymax = _ax[1].get_ylim()
+            y_middle = (ymax + ymin) / 2
+            for a in range(self.num_component_actions):
+                # applied actions
+                _x = np.where(plot_data["applied_actions"][:, comp] == a)
+                _ax[1].plot(
+                    _x,
+                    y_middle,
+                    action_markers[a],
+                    markersize=action_markersize,
+                    color=action_colors[a],
+                )
 
         _ax[0].set_ylabel("Traffic Volume", fontsize=12)
         _ax[1].set_ylabel("Travel Time", fontsize=12)
 
         for ax in _ax:
             ax.set_xlim([-0.5, self.max_timesteps + 0.5])
-            ax.set_xticks(np.arange(0, self.max_timesteps + 1, 1))
-            ax.grid(True, which="both", linestyle="--", linewidth=0.5)
-            ax.set_xlabel("Time (s)", fontsize=12)
+            # ax.set_xticks(np.arange(0, self.max_timesteps + 1, 1))
+            ax.grid(True, which="both", linewidth=0.5)
+            ax.set_xlabel("timestep", fontsize=12)
 
-        fig.suptitle("Traffic Data", fontsize=14)
-        fig.legend(loc="center right", bbox_to_anchor=(1.1, 0.5), fontsize=10)
+        fig.suptitle("Traffic Data | segment: 13 ", fontsize=12, weight="bold")
+        # fig.legend(loc="center right", bbox_to_anchor=(1.1, 0.5), fontsize=10)
         fig.tight_layout()
 
         if save_kwargs:
