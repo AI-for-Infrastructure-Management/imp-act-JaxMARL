@@ -276,6 +276,9 @@ class RolloutPlotter:
             if plot_data["forced_replace_constraint_applied"][t]:
                 ax.plot(t, 50, "x", color="red")
 
+            if plot_data["budget_constraints_applied"][t]:
+                ax.plot(t, 20, "^", color="orange")
+
         ax.set_title("Budget Usage", fontsize=12)
         ax.set_ylabel("% budget used", fontsize=12)
         ax.set_ylim([-2, 105])
@@ -290,7 +293,8 @@ class RolloutPlotter:
             Line2D(
                 [], [], color="green", linestyle="--", alpha=0.6, label="budget renewal"
             ),
-            Line2D([], [], color="red", marker="x", label="forced replace constraint"),
+            Line2D([], [], color="red", marker="x", linestyle="None", label="forced replace constraint"),
+            Line2D([], [], color="orange", marker="^", linestyle="None", label="budget constraint"),
         ]
 
         fig.legend(
