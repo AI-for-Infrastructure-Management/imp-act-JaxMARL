@@ -26,7 +26,7 @@ class RolloutDataGenerator:
         vmapped_seed = 0
 
         # Load checkpoint
-        if checkpoint_dir == None and checkpoint_id == None:
+        if checkpoint_dir is None and checkpoint_id is None:
             self.get_checkpoint_dir_and_id()
         else:
             self.checkpoint_dir = checkpoint_dir
@@ -266,7 +266,8 @@ class RolloutDataGenerator:
 
         return episode_data
 
-    def get_single_episode_data(self, episode_data, episode_idx=0):
+    @staticmethod
+    def get_single_episode_data(episode_data, episode_idx=0):
         """Get a single episode data from the rollout data"""
         return jax.tree_map(lambda x: x[episode_idx], episode_data)
 
