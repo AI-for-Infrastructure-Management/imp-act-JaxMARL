@@ -233,6 +233,7 @@ class RolloutDataGenerator:
             axis=0,
         )
         episode_data["budget_constraints_applied"] = infos["budget_constraints_applied"]
+        episode_data["forced_repair_flags"] = infos["forced_repair_flags"]
 
         # rewards
         episode_data["reward"] = rewards["__all__"]
