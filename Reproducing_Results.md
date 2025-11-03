@@ -77,7 +77,7 @@ python experiments/ippo_rnn_road_env.py --config-path config/final_runs/cologne_
 To run the hyperparameter tuning yourself as described in the paper, use the following commands:
 
 ```bash
-wandb sweep experiments/config/hyperparameter_tuning/{ENV}/{ALG}_sweep.yaml
+wandb sweep experiments/config/hyper_parameter_tuning/{ENV}/{ALG}_sweep.yaml
 wandb agent {SWEEP_ID}
 ```
 
