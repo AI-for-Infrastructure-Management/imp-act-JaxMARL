@@ -152,7 +152,7 @@ def main(cfg: DictConfig):
     print(f"Generated data from {num_rollouts} rollouts.")
 
     NUM_ACTIONS = env.action_space().n
-    period = env.env.budget_renewal_interval
+    period = 5  #!HARDCODED
     horizon = env.env.max_timesteps
     period_stats = {
         key: []
@@ -165,7 +165,7 @@ def main(cfg: DictConfig):
     l = 0
     for m in range(period, horizon + period, period):
         # applied_actions     | shape: (1000, 50, 60)
-        # edge_states         | shape: (1000, 50, 60)
+        # edge_states         | shape: (1000, 51, 60)
         # forced_repair_flags | shape: (1000, 50, 60)
 
         for a in range(NUM_ACTIONS):
