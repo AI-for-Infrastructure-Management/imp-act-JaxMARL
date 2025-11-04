@@ -1,3 +1,4 @@
+# This file was adapted from the original in the process of creating the imp-act adaption of JaxMARL under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
 from .environments import (
     SimpleMPE,
     SimpleTagMPE,
@@ -29,8 +30,8 @@ from .environments import (
     OvercookedV2,
     CoinGame,
     JaxNav,
+    RoadEnvironment_Wrapper,
 )
-
 
 
 def make(env_id: str, **env_kwargs):
@@ -98,7 +99,7 @@ def make(env_id: str, **env_kwargs):
         env = InTheGrid_2p(**env_kwargs)
     elif env_id == "storm_np":
         env = InTheMatrix(**env_kwargs)
-    
+
     # 6. Hanabi
     elif env_id == "hanabi":
         env = Hanabi(**env_kwargs)
@@ -112,12 +113,17 @@ def make(env_id: str, **env_kwargs):
     # 8. Coin Game
     elif env_id == "coin_game":
         env = CoinGame(**env_kwargs)
-        
+
     # 9. JaxNav
     elif env_id == "jaxnav":
         env = JaxNav(**env_kwargs)
 
+    # 10. RoadEnvironment
+    elif env_id == "road_env":
+        env = RoadEnvironment_Wrapper(**env_kwargs)
+
     return env
+
 
 registered_envs = [
     "MPE_simple_v3",
@@ -150,4 +156,5 @@ registered_envs = [
     "overcooked_v2",
     "coin_game",
     "jaxnav",
+    "road_env",
 ]

@@ -1,0 +1,3 @@
+[submodule "imp-act"]
+	path = imp-act
+	url = git@github.com:AI-for-Infrastructure-Management/imp-act.git

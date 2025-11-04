@@ -1,0 +1,60 @@
+"NUM_UPDATES": 6000
+"NUM_ENVS": 32
+"NUM_STEPS": 51
+"BUFFER_SIZE": 5e3
+"BUFFER_BATCH_SIZE": 16
+"HIDDEN_SIZE": 512
+"EPS_START": 1.0
+"EPS_FINISH": 0.001
+"EPS_DECAY": 0.2 # percentage of updates
+"MAX_GRAD_NORM": 12.5
+"TARGET_UPDATE_INTERVAL": 32
+"TAU": 1
+"NUM_EPOCHS": 8
+"LR": 1e-4
+"LEARNING_STARTS": 512 # timesteps
+"LR_LINEAR_DECAY": False
+"GAMMA": 0.99
+"MIXER_EMBEDDING_DIM": 64
+"MIXER_HYPERNET_HIDDEN_DIM": 128
+"MIXER_INIT_SCALE": 0.01
+
+# ENV
+"ENV_NAME": "road_env"
+"ENV_KWARGS":
+  "map_name": "CologneBonnDusseldorf-v1"
+  "encoding_type": "none"       # can be binary, one-hot, sinusoidal or none
+  "include_extra_observations": 
+    "segment_lengths": True     # Length of the segments
+    "volumes": True             # Volumes of the vehicles on the segment normalized by the segment capacity
+    "capacity": False           # Capacity of the segments
+
+"REW_SCALE": 1e-9
+
+# evaluate
+"TEST_DURING_TRAINING": True
+"TEST_INTERVAL": 0.01 # as a fraction of updates
+"TEST_NUM_STEPS": 51
+"TEST_NUM_ENVS": 1000
+
+"ALG_NAME": "qmix_rnn"
+
+############ global params ############
+
+# experiment params
+"NUM_SEEDS": 1 # number of vmapped seeds
+"SEED": "random"
+
+"HYP_TUNE": False # perform hyp tune
+
+# wandb params
+"ENTITY": "imp-act"
+"PROJECT": "jaxMARL-qmix"
+"WANDB_MODE": "online"
+"WANDB_LOG_ALL_SEEDS": False # will log separately the vmapped seeds
+
+# where to save the params (if None, will not save)
+"SAVE_PATH": None
+
+# precision
+"DOUBLE_PRECISION_MODE": False # use double precision for the environment

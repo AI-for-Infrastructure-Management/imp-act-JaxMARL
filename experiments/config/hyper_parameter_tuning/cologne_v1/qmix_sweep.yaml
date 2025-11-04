@@ -1,0 +1,80 @@
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --config-path=./config/hyper_parameter_tuning/cologne_v1
+entity: imp-act
+method: random
+metric:
+  goal: maximize
+  name: test_returned_episode_returns
+name: qmix_rnn_hyperparameter_tuning_cologne
+parameters:
+  # --- General Hyperparameters ---
+  NUM_UPDATES:
+    value: 6000
+  NUM_ENVS:
+    values: [8, 32]
+  NUM_STEPS:
+    value: 51
+  BUFFER_SIZE:
+    value: 5000
+  BUFFER_BATCH_SIZE:
+    value: 64
+  HIDDEN_SIZE:
+    values: [256, 512]
+  MAX_GRAD_NORM:
+    value: 12.5
+  TARGET_UPDATE_INTERVAL:
+    values: [32]
+  TAU:
+    value: 1
+  NUM_EPOCHS:
+    values: [4, 8]
+  LR:
+    values: [0.001, 0.0005, 0.0001]
+  LEARNING_STARTS:
+    value: 10000
+  LR_LINEAR_DECAY:
+    value: False
+  GAMMA:
+    value: 0.99
+
+  # --- Exploration ---
+  EPS_START:
+    value: 1
+  EPS_FINISH:
+    values: [0, 0.001]
+  EPS_DECAY:
+    values: [0.1, 0.2]
+
+  # --- Mixer Specific ---
+  MIXER_EMBEDDING_DIM:
+    values: [32, 64]
+  MIXER_HYPERNET_HIDDEN_DIM:
+    values: [128, 256]
+  MIXER_INIT_SCALE:
+    value: 0.001
+
+  # --- Environment/Reward ---
+  REW_SCALE:
+    value: 1.0e-8
+
+  # --- Environment Configuration ---
+  ENV_KWARGS:
+      values:
+      - encoding_type: binary
+        include_extra_observations:
+          segment_lengths: true
+          volumes: true
+          capacity: false
+        map_name: Cologne-v1
+      - encoding_type: none
+        include_extra_observations:
+          segment_lengths: true
+          volumes: true
+          capacity: false
+        map_name: Cologne-v1
+
+program: experiments/qmix_rnn_road_env.py
+project: jaxMARL-Cologne-v1

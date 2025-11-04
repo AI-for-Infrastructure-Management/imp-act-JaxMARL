@@ -1,4 +1,6 @@
-""" Wrappers for use with jaxmarl baselines. """
+# This file was adapted from the original in the process of creating the imp-act adaption of JaxMARL under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
+"""Wrappers for use with jaxmarl baselines."""
+
 import os
 import jax
 import jax.numpy as jnp
@@ -17,11 +19,13 @@ from jaxmarl.environments.multi_agent_env import MultiAgentEnv, State
 from safetensors.flax import save_file, load_file
 from flax.traverse_util import flatten_dict, unflatten_dict
 
+
 def save_params(params: Dict, filename: Union[str, os.PathLike]) -> None:
-    flattened_dict = flatten_dict(params, sep=',')
+    flattened_dict = flatten_dict(params, sep=",")
     save_file(flattened_dict, filename)
 
-def load_params(filename:Union[str, os.PathLike]) -> Dict:
+
+def load_params(filename: Union[str, os.PathLike]) -> Dict:
     flattened_dict = load_file(filename)
     return unflatten_dict(flattened_dict, sep=",")
 
@@ -101,7 +105,8 @@ class LogWrapper(JaxMARLWrapper):
         info["returned_episode_lengths"] = state.returned_episode_lengths
         info["returned_episode"] = jnp.full((self._env.num_agents,), ep_done)
         return obs, state, reward, done, info
-    
+
+
 @struct.dataclass
 class OvercookedV2LogEnvState:
     env_state: State
@@ -187,9 +192,9 @@ class OvercookedV2LogWrapper(JaxMARLWrapper):
 
 
 class MPELogWrapper(LogWrapper):
-    """ Times reward signal by number of agents within the environment,
-    to match the on-policy codebase. """
-    
+    """Times reward signal by number of agents within the environment,
+    to match the on-policy codebase."""
+
     @partial(jax.jit, static_argnums=(0,))
     def step(
         self,
@@ -200,7 +205,9 @@ class MPELogWrapper(LogWrapper):
         obs, env_state, reward, done, info = self._env.step(
             key, state.env_state, action
         )
-        rewardlog = jax.tree.map(lambda x: x*self._env.num_agents, reward)  # As per on-policy codebase
+        rewardlog = jax.tree.map(
+            lambda x: x * self._env.num_agents, reward
+        )  # As per on-policy codebase
         ep_done = done["__all__"]
         new_episode_return = state.episode_returns + self._batchify_floats(rewardlog)
         new_episode_length = state.episode_lengths + 1
@@ -219,6 +226,7 @@ class MPELogWrapper(LogWrapper):
         info["returned_episode_lengths"] = state.returned_episode_lengths
         info["returned_episode"] = jnp.full((self._env.num_agents,), ep_done)
         return obs, state, reward, done, info
+
 
 @struct.dataclass
 class SMAXLogEnvState:
@@ -294,7 +302,9 @@ def get_space_dim(space):
         return np.prod(space.shape)
     else:
         print(space)
-        raise NotImplementedError('Current wrapper works only with Discrete/MultiDiscrete/Box action and obs spaces')
+        raise NotImplementedError(
+            "Current wrapper works only with Discrete/MultiDiscrete/Box action and obs spaces"
+        )
 
 
 class CTRolloutManager(JaxMARLWrapper):
@@ -310,52 +320,80 @@ class CTRolloutManager(JaxMARLWrapper):
     - global_reward is the sum of all agents' rewards.
     """
 
-    def __init__(self, env: MultiAgentEnv, batch_size:int, training_agents:List=None, preprocess_obs:bool=True):
-        
+    def __init__(
+        self,
+        env: MultiAgentEnv,
+        batch_size: int,
+        training_agents: List = None,
+        preprocess_obs: bool = True,
+    ):
+
         super().__init__(env)
-        
+
         self.batch_size = batch_size
 
         # the agents to train could differ from the total trainable agents in the env (f.i. if using pretrained agents)
         # it's important to know it in order to compute properly the default global rewards and state
-        self.training_agents = self.agents if training_agents is None else training_agents  
-        self.preprocess_obs = preprocess_obs  
+        self.training_agents = (
+            self.agents if training_agents is None else training_agents
+        )
+        self.preprocess_obs = preprocess_obs
 
         # TOREMOVE: this is because overcooked doesn't follow other envs conventions
         if len(env.observation_spaces) == 0:
-            self.observation_spaces = {agent:self.observation_space() for agent in self.agents}
+            self.observation_spaces = {
+                agent: self.observation_space() for agent in self.agents
+            }
         if len(env.action_spaces) == 0:
-            self.action_spaces = {agent:env.action_space() for agent in self.agents}
-        
+            self.action_spaces = {agent: env.action_space() for agent in self.agents}
+
         # batched action sampling
-        self.batch_samplers = {agent: jax.jit(jax.vmap(self.action_space(agent).sample, in_axes=0)) for agent in self.agents}
+        self.batch_samplers = {
+            agent: jax.jit(jax.vmap(self.action_space(agent).sample, in_axes=0))
+            for agent in self.agents
+        }
 
         # assumes the observations are flattened vectors
-        self.max_obs_length = max(list(map(lambda x: get_space_dim(x), self.observation_spaces.values())))
-        self.max_action_space = max(list(map(lambda x: get_space_dim(x), self.action_spaces.values())))
+        self.max_obs_length = max(
+            list(map(lambda x: get_space_dim(x), self.observation_spaces.values()))
+        )
+        self.max_action_space = max(
+            list(map(lambda x: get_space_dim(x), self.action_spaces.values()))
+        )
         self.obs_size = self.max_obs_length
         if self.preprocess_obs:
             self.obs_size += len(self.agents)
 
         # agents ids
-        self.agents_one_hot = {a:oh for a, oh in zip(self.agents, jnp.eye(len(self.agents)))}
+        self.agents_one_hot = {
+            a: oh for a, oh in zip(self.agents, jnp.eye(len(self.agents)))
+        }
         # valid actions
-        self.valid_actions = {a:jnp.arange(u.n) for a, u in self.action_spaces.items()}
-        self.valid_actions_oh ={a:jnp.concatenate((jnp.ones(u.n), jnp.zeros(self.max_action_space - u.n))) for a, u in self.action_spaces.items()}
+        self.valid_actions = {a: jnp.arange(u.n) for a, u in self.action_spaces.items()}
+        self.valid_actions_oh = {
+            a: jnp.concatenate((jnp.ones(u.n), jnp.zeros(self.max_action_space - u.n)))
+            for a, u in self.action_spaces.items()
+        }
 
         # custom global state and rewards for specific envs
-        if 'smax' in env.name.lower():
-            self.global_state = lambda obs, state: obs['world_state']
+        if "smax" in env.name.lower():
+            self.global_state = lambda obs, state: obs["world_state"]
             self.global_reward = lambda rewards: rewards[self.training_agents[0]]
-            self.get_valid_actions = lambda state: jax.vmap(env.get_avail_actions)(state)
-        elif 'overcooked' in env.name.lower():
-            self.global_state = lambda obs, state:  jnp.concatenate([obs[agent].flatten() for agent in self.agents], axis=-1)
+            self.get_valid_actions = lambda state: jax.vmap(env.get_avail_actions)(
+                state
+            )
+        elif "overcooked" in env.name.lower():
+            self.global_state = lambda obs, state: jnp.concatenate(
+                [obs[agent].flatten() for agent in self.agents], axis=-1
+            )
             self.global_reward = lambda rewards: rewards[self.training_agents[0]]
-        elif 'hanabi' in env.name.lower():
+        elif "hanabi" in env.name.lower():
             self.global_reward = lambda rewards: rewards[self.training_agents[0]]
             self.get_valid_actions = lambda state: jax.vmap(env.get_legal_moves)(state)
+        elif "road_env" in env.name.lower():
+            self.global_reward = lambda rewards: rewards["agent_0"]
+            self.global_state = lambda obs, state: self._env.get_global_state(obs, state.env_state)
 
-    
     @partial(jax.jit, static_argnums=0)
     def batch_reset(self, key):
         keys = jax.random.split(key, self.batch_size)
@@ -370,7 +408,11 @@ class CTRolloutManager(JaxMARLWrapper):
     def wrapped_reset(self, key):
         obs_, state = self._env.reset(key)
         if self.preprocess_obs:
-            obs = jax.tree.map(self._preprocess_obs, {agent:obs_[agent] for agent in self.agents}, self.agents_one_hot)
+            obs = jax.tree.map(
+                self._preprocess_obs,
+                {agent: obs_[agent] for agent in self.agents},
+                self.agents_one_hot,
+            )
         else:
             obs = obs_
         obs["__all__"] = self.global_state(obs_, state)
@@ -380,37 +422,53 @@ class CTRolloutManager(JaxMARLWrapper):
     def wrapped_step(self, key, state, actions):
         obs_, state, reward, done, infos = self._env.step(key, state, actions)
         if self.preprocess_obs:
-            obs = jax.tree.map(self._preprocess_obs, {agent:obs_[agent] for agent in self.agents}, self.agents_one_hot)
-            obs = jax.tree.map(lambda d, o: jnp.where(d, 0., o), {agent:done[agent] for agent in self.agents}, obs) # ensure that the obs are 0s for done agents
+            obs = jax.tree.map(
+                self._preprocess_obs,
+                {agent: obs_[agent] for agent in self.agents},
+                self.agents_one_hot,
+            )
+            obs = jax.tree.map(
+                lambda d, o: jnp.where(d, 0.0, o),
+                {agent: done[agent] for agent in self.agents},
+                obs,
+            )  # ensure that the obs are 0s for done agents
         else:
             obs = obs_
         obs["__all__"] = self.global_state(obs_, state)
-        reward["__all__"] = self.global_reward(reward)
+        if not "__all__" in reward:
+            reward["__all__"] = self.global_reward(reward)
         return obs, state, reward, done, infos
 
     @partial(jax.jit, static_argnums=0)
     def global_state(self, obs, state):
         return jnp.concatenate([obs[agent] for agent in self.agents], axis=-1)
-    
+
     @partial(jax.jit, static_argnums=0)
     def global_reward(self, reward):
-        return jnp.stack([reward[agent] for agent in self.training_agents]).sum(axis=0) 
-    
+        return jnp.stack([reward[agent] for agent in self.training_agents]).sum(axis=0)
+
     def batch_sample(self, key, agent):
-        return self.batch_samplers[agent](jax.random.split(key, self.batch_size)).astype(int)
-    
+        return self.batch_samplers[agent](
+            jax.random.split(key, self.batch_size)
+        ).astype(int)
+
     @partial(jax.jit, static_argnums=0)
     def get_valid_actions(self, state):
-        # default is to return the same valid actions one hot encoded for each env 
-        return {agent:jnp.tile(actions, self.batch_size).reshape(self.batch_size, -1) for agent, actions in self.valid_actions_oh.items()}
+        # default is to return the same valid actions one hot encoded for each env
+        return {
+            agent: jnp.tile(actions, self.batch_size).reshape(self.batch_size, -1)
+            for agent, actions in self.valid_actions_oh.items()
+        }
 
     @partial(jax.jit, static_argnums=0)
     def _preprocess_obs(self, arr, extra_features):
         # flatten
         arr = arr.flatten()
         # pad the observation vectors to the maximum length
-        pad_width = [(0, 0)] * (arr.ndim - 1) + [(0, max(0, self.max_obs_length - arr.shape[-1]))]
-        arr = jnp.pad(arr, pad_width, mode='constant', constant_values=0)
+        pad_width = [(0, 0)] * (arr.ndim - 1) + [
+            (0, max(0, self.max_obs_length - arr.shape[-1]))
+        ]
+        arr = jnp.pad(arr, pad_width, mode="constant", constant_values=0)
         # concatenate the extra features
         arr = jnp.concatenate((arr, extra_features), axis=-1)
         return arr

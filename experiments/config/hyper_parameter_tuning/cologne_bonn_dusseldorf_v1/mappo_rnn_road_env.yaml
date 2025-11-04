@@ -1,0 +1,58 @@
+"NUM_UPDATES": 2000
+"NUM_ENVS": 128
+"LR": 0.001
+"UPDATE_EPOCHS": 4
+"NUM_MINIBATCHES": 4
+
+"REWARD_STANDARDIZATION": True
+"MAX_GRAD_NORM": 0.5
+"ENT_COEF": 0.0
+"NUM_STEPS": 128
+"GAE_LAMBDA": 0.95
+"CLIP_EPS": 0.2
+"ACTIVATION": "relu" # hardcoded in the script
+"VF_COEF": 0.5
+
+"GRU_HIDDEN_DIM": 64
+# FC_DIM_SIZE: ~ # embedding size for the GRU, must be same as the GRU hidden size, will be set in the script
+"GAMMA": 0.99
+"ANNEAL_LR": True
+"SCALE_CLIP_EPS": False
+
+# ENV
+"ENV_NAME": "road_env"
+"ENV_KWARGS":
+  "map_name": "CologneBonnDusseldorf-v1"
+  "encoding_type": "binary"     # can be binary, one-hot, sinusoidal or none
+  "include_extra_observations": 
+    "segment_lengths": True     # Length of the segments
+    "volumes": True             # Volumes of the vehicles on the segment normalized by the segment capacity
+    "capacity": False           # Capacity of the segments
+
+# EVALUATION
+"TEST_DURING_TRAINING": True
+"TEST_INTERVAL": 0.01 # as a fraction of updates
+"TEST_NUM_STEPS": 50
+"TEST_NUM_ENVS": 1_000
+
+"ALG_NAME": "mappo_rnn"
+
+############ global params ############
+
+# experiment params
+"NUM_SEEDS": 1 # number of vmapped seeds
+"SEED": 0
+
+"HYP_TUNE": False # perform hyp tune
+
+# WandB Params
+"WANDB_MODE": "online"
+"ENTITY": "imp-act"
+"PROJECT": "jaxMARL"
+"WANDB_LOG_ALL_SEEDS": False # will log vmapped seeds separately
+
+# where to save the params (if None, will not save)
+"SAVE_PATH": null
+
+# precision
+"DOUBLE_PRECISION_MODE": False # use double precision for the environment
