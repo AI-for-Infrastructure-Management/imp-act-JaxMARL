@@ -1,27 +1,21 @@
 # This file was adapted from the original in the process of creating the imp-act adaption of JaxMARL under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
 
 # Use a CUDA runtime image
-FROM nvidia/cuda:12.6.2-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.6.2-base-ubuntu22.04
 
 # Set working directory
 WORKDIR /workspace
 
 # Install system dependencies
 RUN apt-get update && \
-    apt-get install -y wget curl bzip2 vim git build-essential && \
-    apt-get clean && \
+    apt-get install -y --no-install-recommends \
+    wget curl ca-certificates git build-essential bzip2 && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Miniconda
-ENV CONDA_DIR=/opt/conda
-RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
-    bash /tmp/miniconda.sh -b -p $CONDA_DIR && \
-    rm /tmp/miniconda.sh && \
-    $CONDA_DIR/bin/conda init bash
-
-# Set PATH so conda is accessible everywhere
-ENV PATH=$CONDA_DIR/bin:$PATH
-SHELL ["/bin/bash", "-c"]
+# Install uv (standalone binary) 
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.cargo/bin:$PATH"
+ENV PATH="/root/.local/bin:/root/.cargo/bin:$PATH"
 
 # Clone repositories
 RUN git clone https://github.com/AI-for-Infrastructure-Management/imp-act-JaxMARL.git && \
@@ -31,34 +25,41 @@ RUN git clone https://github.com/AI-for-Infrastructure-Management/imp-act-JaxMAR
     cd imp-act && \
     git checkout main
 
-# Create Conda environment (impact-jaxmarl-env)
-RUN conda env create -f imp-act-JaxMARL/conda_environment.yaml
-
-# Set conda environment path (for clarity)
-ENV CONDA_DEFAULT_ENV=impact-jaxmarl-env
-ENV PATH=$CONDA_DIR/envs/impact-jaxmarl-env/bin:$PATH
+# Create venv and install Python 3.10 with uv
+# venv is needed to avoid conflicts with system cuda/python packages
+WORKDIR /workspace/imp-act-JaxMARL
+RUN uv python install 3.10 && uv venv --python 3.10 .venv
+# make sure Python in this venv is used by default
+ENV PATH="/workspace/imp-act-JaxMARL/.venv/bin:$PATH"
 
 # Install Python Packages
 
 # 1. Modify Jax dependency for CUDA 
-RUN sed -i 's/jax==\(.*\)/jax[cuda12]==\1/' imp-act-JaxMARL/pyproject.toml
+RUN sed -i 's/jax==\(.*\)/jax[cuda12]==\1/' /workspace/imp-act-JaxMARL/pyproject.toml
 
 # 2. Install JaxMARL
-RUN /bin/bash -c "source $CONDA_DIR/etc/profile.d/conda.sh && \
-    conda activate impact-jaxmarl-env && \
-    cd imp-act-JaxMARL && \
-    pip install --no-cache-dir -e '.[algs]'"
+RUN cd /workspace/imp-act-JaxMARL && \
+    uv pip install --no-cache-dir -e ".[algs]"
 # Undo the Jax dependency modification
-RUN sed -i 's/jax\[cuda12\]==\(.*\)/jax==\1/' imp-act-JaxMARL/pyproject.toml
+RUN sed -i 's/jax\[cuda12\]==\(.*\)/jax==\1/' /workspace/imp-act-JaxMARL/pyproject.toml
 
 # 3. Install imp-act
-RUN /bin/bash -c "source $CONDA_DIR/etc/profile.d/conda.sh && \
-    conda activate impact-jaxmarl-env && \
-    cd imp-act-JaxMARL/imp-act && \
-    poetry install --with dev,vis"
+RUN cd /workspace/imp-act-JaxMARL/imp-act && \
+    uv pip install -r requirements/requirements.txt && \
+    uv pip install -e .
 
 # Clean up
-RUN rm -rf ~/.cache/pip
+RUN rm -rf \
+    ~/.cache \
+    /root/.cache \
+    /var/lib/apt/lists/* \
+    /tmp/* \
+    /var/tmp/* \
+    /usr/share/doc/* \
+    /usr/share/man/* \
+    /usr/share/info/* \
+    /var/cache/apt/* && \
+    apt-get autoremove -y && apt-get clean
 
-# Persist environment variables
-RUN printenv > /etc/environment
+# Set final working directory
+WORKDIR /workspace/imp-act-JaxMARL
