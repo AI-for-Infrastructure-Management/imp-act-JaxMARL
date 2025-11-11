@@ -161,6 +161,48 @@ def get_budget_prioritized_policy(policy, params):
             lambda: (action_arr, False),
         )
 
+        def apply_top_k_constraint():
+            if params.get("top_k") is False:
+                return constrained_action
+            top_k = params.get("top_k")
+            # Get indices of top_k priorities
+            if params["prioritization_key"] == "cost":
+                priorities = adjusted_cost
+            elif params["prioritization_key"] == "segment_lengths":
+                priorities = road_env.segment_lengths
+            elif params["prioritization_key"] == "volumes":
+                priorities = road_env.initial_edge_volumes
+            elif params["prioritization_key"] == "random":
+                priorities = jax.random.uniform(prio_key, shape=action_arr.shape)
+            elif params["prioritization_key"] == "list":
+                if len(prioritization_list) != len(action_arr):
+                    raise ValueError("Length of prioritization list must match number of agents.")
+                priorities = prioritization_list
+            else:
+                raise ValueError(f"Unknown prioritization key: {params['prioritization_key']}")
+            
+            if params.get("prioritization_sign") == "negative":
+                priorities = -priorities
+
+            priorities = jnp.where(forced_repair_mask, -jnp.inf, priorities)
+            sorted_indices = jnp.argsort(priorities, descending=True)
+            top_k_indices = sorted_indices[:top_k]
+
+            top_k_constrained_action = jnp.where(
+                jnp.isin(jnp.arange(len(action_arr)), top_k_indices),
+                constrained_action,
+                do_nothing_action,
+            )
+            return top_k_constrained_action
+        
+        if params.get("top_k", False):
+            # Apply top-k constraint after budget constraint if we are not in the last timestep of a budtget period
+            constrained_action = jax.lax.cond(
+                road_env.get_budget_remaining_time(road_env_state.timestep) > 1,
+                lambda: apply_top_k_constraint(),
+                lambda: constrained_action,
+            )
+
         actions_dict = {f"agent_{i}": constrained_action[i] for i in range(len(obs))}
         return actions_dict
     return prioritized_policy
