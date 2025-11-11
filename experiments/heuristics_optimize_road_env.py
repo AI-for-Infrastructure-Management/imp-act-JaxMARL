@@ -64,6 +64,11 @@ def get_budget_prioritized_policy(policy, params):
             prio_key = jax.random.PRNGKey(seed)
         else:
             prio_key = jax.random.PRNGKey(seed)
+    
+    if params.get("prioritization_key") == "list":
+        prioritization_list = jnp.array(params.get("prioritization_list"))
+        if len(prioritization_list) == 0:
+            raise ValueError("Prioritization list cannot be empty when using 'list' key.")
 
     def prioritized_policy(key, state, obs, env):
         """Policy that prioritizes actions based on configured strategy within budget constraints."""
@@ -122,6 +127,10 @@ def get_budget_prioritized_policy(policy, params):
                 priorities = road_env.initial_edge_volumes
             elif params["prioritization_key"] == "random":
                 priorities = jax.random.uniform(prio_key, shape=action_arr.shape)
+            elif params["prioritization_key"] == "list":
+                if len(prioritization_list) != len(action_arr):
+                    raise ValueError("Length of prioritization list must match number of agents.")
+                priorities = prioritization_list
             else:
                 raise ValueError(f"Unknown prioritization key: {params['prioritization_key']}")
             
