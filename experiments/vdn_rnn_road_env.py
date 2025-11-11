@@ -718,6 +718,7 @@ def single_run(config):
         ],
         config=config,
         mode=config["WANDB_MODE"],
+        dir=config.get("WANDB_DIR", None),
     )
 
     # update the default params in case of overriding
