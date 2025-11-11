@@ -8,6 +8,6 @@ num_steps: 100
 norm_constant: 1e6
 plot_histogram: False
 double_precision_mode: False
-priorization_params: 
-  priorization_key: "cost" # Options: "segment_lengths", "cost", "volumes"
-  priorization_sign: "negative"
+prioritization_params: 
+  prioritization_key: "cost" # Options: "segment_lengths", "cost", "volumes"
+  prioritization_sign: "negative"

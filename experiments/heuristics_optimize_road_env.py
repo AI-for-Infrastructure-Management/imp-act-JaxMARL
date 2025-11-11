@@ -53,11 +53,11 @@ def get_budget_prioritized_policy(policy, params):
     Args:
         policy: The base policy function to wrap
         params: Dictionary containing prioritization configuration:
-            - priorization_key: Strategy for prioritization ("cost", "segment_lengths", "volumes", "random")
-            - priorization_sign: "negative" to reverse prioritization order
+            - prioritization_key: Strategy for prioritization ("cost", "segment_lengths", "volumes", "random", "list")
+            - prioritization_sign: "negative" to reverse prioritization order
             - random_seed: Seed for random prioritization (or "random" for a random seed)
     """
-    if params.get("priorization_key") == "random":
+    if params.get("prioritization_key") == "random":
         seed = params.get("random_seed")
         if seed == "random":
             seed = np.random.randint(0, 2**32 - 1)
@@ -114,18 +114,18 @@ def get_budget_prioritized_policy(policy, params):
         # Apply constraints if needed
         def apply_constraints():
             # Select actions based on most effective cost-benefit ratio (negative due to )
-            if params["priorization_key"] == "cost":
+            if params["prioritization_key"] == "cost":
                 priorities = adjusted_cost
-            elif params["priorization_key"] == "segment_lengths":
+            elif params["prioritization_key"] == "segment_lengths":
                 priorities = road_env.segment_lengths
-            elif params["priorization_key"] == "volumes":
+            elif params["prioritization_key"] == "volumes":
                 priorities = road_env.initial_edge_volumes
-            elif params["priorization_key"] == "random":
+            elif params["prioritization_key"] == "random":
                 priorities = jax.random.uniform(prio_key, shape=action_arr.shape)
             else:
-                raise ValueError(f"Unknown priorization key: {params['priorization_key']}")
+                raise ValueError(f"Unknown prioritization key: {params['prioritization_key']}")
             
-            if params.get("priorization_sign") == "negative":
+            if params.get("prioritization_sign") == "negative":
                 priorities = -priorities
 
             # Don't constrain forced repairs
@@ -166,9 +166,9 @@ def run_rollout_with_params(key, env, interval, threshold, seed, num_steps, conf
     """
     policy = parametric_heuristic_policy(interval, threshold)
     
-    if hasattr(env._env.env, "_get_budget_action_cost") and config.get("priorization_params") is not None:
-        prio_params = dict(config.priorization_params)
-        if prio_params.get("priorization_key") == "random":
+    if hasattr(env._env.env, "_get_budget_action_cost") and config.get("prioritization_enabled", False):
+        prio_params = dict(config.prioritization_params)
+        if prio_params.get("prioritization_key") == "random":
             prio_params["random_seed"] = seed
         policy = get_budget_prioritized_policy(policy, prio_params)
         
