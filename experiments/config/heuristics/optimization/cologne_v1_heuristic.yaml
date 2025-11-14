@@ -2,15 +2,16 @@ map: Cologne-v1  # Options: ToyExample-v2, Cologne-v1, CologneBonnDusseldorf-v1
 policy: humble_heuristic  # Options: do_nothing, random, humble_heuristic
 policy_params:
   inspection_interval: 40  # Every n timesteps the policy will perform inspection (action 1)
-  repair_threshold: 1     # When observation exceeds this value, repair action is taken (action 2)
+  repair_threshold: 1      # When observation exceeds this value, repair action is taken (action 2)
+  prioritization_enabled: True
+  prioritization_params: 
+    prioritization_key: "segment_lengths" # Options: "segment_lengths", "costs", "volumes"
+    prioritization_sign: "negative"
 num_episodes: 10000
 num_steps: 50
 norm_constant: 1e6
 plot_histogram: False
 double_precision_mode: False
-prioritization_params: 
-  prioritization_key: "segment_lengths" # Options: "segment_lengths", "costs", "volumes"
-  prioritization_sign: "negative"
 
 # Optimization parameters
 optimization:

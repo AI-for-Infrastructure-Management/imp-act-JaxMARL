@@ -271,8 +271,10 @@ def main(cfg: DictConfig):
     policy_params = cfg.get("policy_params", {})
     policy = policy_factory(policy_params)
 
-    if cfg.get("priorization_params") is not None:
-        policy = get_budget_prioritized_policy(policy, cfg.priorization_params)
+    # Prioritization settings are now part of policy_params
+    if policy_params.get("prioritization_enabled", False):
+        prio_params = dict(policy_params.prioritization_params)
+        policy = get_budget_prioritized_policy(policy, prio_params)
 
     NUM_EPISODES = cfg.num_episodes
     NUM_STEPS = cfg.num_steps

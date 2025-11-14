@@ -216,9 +216,9 @@ def run_rollout_with_params(key, env, interval, threshold, seed, num_steps, conf
     Given specific (interval, threshold, seed), build the correct policy, then run a single rollout.
     """
     policy = parametric_heuristic_policy(interval, threshold)
-    
-    if hasattr(env._env.env, "_get_budget_action_cost") and config.get("prioritization_enabled", False):
-        prio_params = dict(config.prioritization_params)
+
+    if hasattr(env._env.env, "_get_budget_action_cost") and config.get("policy_params", {}).get("prioritization_enabled", False):
+        prio_params = dict(config.policy_params.prioritization_params)
         if prio_params.get("prioritization_key") == "random":
             prio_params["random_seed"] = seed
         policy = get_budget_prioritized_policy(policy, prio_params)
