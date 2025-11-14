@@ -86,8 +86,8 @@ def get_budget_prioritized_policy(policy, params):
     """
 
     if params.get("prioritization_key") == "random":
-        seed = params.get("random_seed")
-        if params.get("random_seed") == "random":
+        seed = params.get("prioritization_random_seed")
+        if params.get("prioritization_random_seed") == "random":
             seed = np.random.randint(0, 2**32 - 1)
         log.info(f"Random seed for budget prioritization: {seed}")
         prio_key = jax.random.PRNGKey(seed)
@@ -189,9 +189,9 @@ def get_budget_prioritized_policy(policy, params):
         )
 
         def apply_top_k_constraint():
-            if params.get("top_k") is False:
+            if params.get("prioritization_top_k") is False:
                 return constrained_action
-            top_k = params.get("top_k")
+            top_k = params.get("prioritization_top_k")
             # Get indices of top_k priorities
             if params["prioritization_key"] == "cost":
                 priorities = adjusted_cost
@@ -281,13 +281,12 @@ def main(cfg: DictConfig):
     
     # Get policy with parameters
     policy_factory = globals()[f"get_policy_{policy_name}"]
-    # Extract policy parameters if they exist
-    policy_params = cfg.get("policy_params", {})
+    # Extract policy parameters (flat, under policy_parameters)
+    policy_params = cfg.policy_parameters
     policy = policy_factory(policy_params)
 
     if policy_params.get("prioritization_enabled", False):
-        prio_params = dict(policy_params.prioritization_params)
-        policy = get_budget_prioritized_policy(policy, prio_params)
+        policy = get_budget_prioritized_policy(policy, policy_params)
 
     NUM_EPISODES = cfg.num_episodes
     NUM_STEPS = cfg.num_steps

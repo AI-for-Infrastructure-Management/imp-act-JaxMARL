@@ -217,11 +217,16 @@ def run_rollout_with_params(key, env, interval, threshold, seed, num_steps, conf
     """
     policy = parametric_heuristic_policy(interval, threshold)
 
-    if hasattr(env._env.env, "_get_budget_action_cost") and config.get("policy_params", {}).get("prioritization_enabled", False):
-        prio_params = dict(config.policy_params.prioritization_params)
-        if prio_params.get("prioritization_key") == "random":
-            prio_params["random_seed"] = seed
-        policy = get_budget_prioritized_policy(policy, prio_params)
+    # Prioritization settings are now flat fields inside policy_parameters
+    policy_params = config.policy_parameters
+
+    if hasattr(env._env.env, "_get_budget_action_cost") and policy_params.get("prioritization_enabled", False):
+        # Reuse policy_params directly; just adjust prioritization_random_seed per combo if needed
+        if policy_params.get("prioritization_key") == "random":
+            policy_params = dict(policy_params)
+            policy_params["prioritization_random_seed"] = seed
+
+        policy = get_budget_prioritized_policy(policy, policy_params)
         
     return run_rollout(key, env, policy, num_steps)
 

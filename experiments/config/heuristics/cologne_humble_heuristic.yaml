@@ -5,20 +5,19 @@ num_steps: 50
 norm_constant: 1e6
 plot_histogram: False
 double_precision_mode: False
-policy_params:
+policy_parameters:
   inspection_interval: 6  # Every n timesteps the policy will perform inspection (action 1)
   repair_threshold: 1     # When observation exceeds this value, repair action is taken (action 2)
   prioritization_enabled: True
-  prioritization_params: 
-    prioritization_key: "segment_lengths" # Options: "segment_lengths", "costs", "volumes", "list"
-    prioritization_sign: "negative" # Options: "positive", "negative"
-    prioritization_list: [ # Used only if prioritization_key is "list"
-          59,  4, 53, 40, 49, 52, 30, 29, 23, 25, 51, 15, 44, 19, 18, 28, 55,
-          12, 10, 37, 57, 34, 58, 17, 20, 48, 50, 56, 24, 41, 43, 21, 13, 54,
-          0,  1, 14, 35, 22, 16, 27, 47, 38, 26,  9,  2, 36, 33,  3, 45, 31,
-          42,  8, 39, 32, 11,  7,  6,  5, 46]
-    random_seed: 29 # Options: "random", integernumber
-    top_k: 54  # Number of top priority actions to consider. Options: integer number, False
+  prioritization_key: "segment_lengths" # Options: "segment_lengths", "costs", "volumes", "list"
+  prioritization_sign: "negative" # Options: "positive", "negative"
+  prioritization_list: [ # Used only if prioritization_key is "list"
+        59,  4, 53, 40, 49, 52, 30, 29, 23, 25, 51, 15, 44, 19, 18, 28, 55,
+        12, 10, 37, 57, 34, 58, 17, 20, 48, 50, 56, 24, 41, 43, 21, 13, 54,
+        0,  1, 14, 35, 22, 16, 27, 47, 38, 26,  9,  2, 36, 33,  3, 45, 31,
+        42,  8, 39, 32, 11,  7,  6,  5, 46]
+  prioritization_random_seed: 29 # Options: "random", integernumber
+  prioritization_top_k: 54  # Number of top priority actions to consider. Options: integer number, False
 
 # Optimization parameters
 optimization:
