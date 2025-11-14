@@ -85,12 +85,18 @@ def get_budget_prioritized_policy(policy, params):
             - repair_threshold: Observation threshold above which repair action is taken (action 2)
     """
 
-    if params.get("priorization_key") == "random":
+    if params.get("prioritization_key") == "random":
         seed = params.get("random_seed")
         if params.get("random_seed") == "random":
             seed = np.random.randint(0, 2**32 - 1)
         log.info(f"Random seed for budget prioritization: {seed}")
         prio_key = jax.random.PRNGKey(seed)
+
+    # Support explicit prioritization list
+    if params.get("prioritization_key") == "list":
+        prioritization_list = jnp.array(params.get("prioritization_list"))
+        if len(prioritization_list) == 0:
+            raise ValueError("Prioritization list cannot be empty when using 'list' key.")
 
 
     def prioritized_policy(key, state, obs, env):
@@ -140,18 +146,22 @@ def get_budget_prioritized_policy(policy, params):
         # Apply constraints if needed
         def apply_constraints():
             # Select actions based on most effective cost-benefit ratio (negative due to )
-            if params["priorization_key"] == "cost":
+            if params["prioritization_key"] == "cost":
                 priorities = adjusted_cost
-            elif params["priorization_key"] == "segment_lengths":
+            elif params["prioritization_key"] == "segment_lengths":
                 priorities = road_env.segment_lengths
-            elif params["priorization_key"] == "volumes":
+            elif params["prioritization_key"] == "volumes":
                 priorities = road_env.initial_edge_volumes
-            elif params["priorization_key"] == "random":
+            elif params["prioritization_key"] == "random":
                 priorities = jax.random.uniform(prio_key, shape=action.shape)
+            elif params["prioritization_key"] == "list":
+                if len(prioritization_list) != len(action):
+                    raise ValueError("Length of prioritization list must match number of agents.")
+                priorities = prioritization_list
             else:
-                raise ValueError(f"Unknown priorization key: {params['priorization_key']}")
+                raise ValueError(f"Unknown prioritization key: {params['prioritization_key']}")
             
-            if params.get("priorization_sign") == "negative":
+            if params.get("prioritization_sign") == "negative":
                 priorities = -priorities
 
             # Don't constrain forced repairs
@@ -177,6 +187,49 @@ def get_budget_prioritized_policy(policy, params):
             lambda: apply_constraints(),
             lambda: (action, False),
         )
+
+        def apply_top_k_constraint():
+            if params.get("top_k") is False:
+                return constrained_action
+            top_k = params.get("top_k")
+            # Get indices of top_k priorities
+            if params["prioritization_key"] == "cost":
+                priorities = adjusted_cost
+            elif params["prioritization_key"] == "segment_lengths":
+                priorities = road_env.segment_lengths
+            elif params["prioritization_key"] == "volumes":
+                priorities = road_env.initial_edge_volumes
+            elif params["prioritization_key"] == "random":
+                priorities = jax.random.uniform(prio_key, shape=action.shape)
+            elif params["prioritization_key"] == "list":
+                if len(prioritization_list) != len(action):
+                    raise ValueError("Length of prioritization list must match number of agents.")
+                priorities = prioritization_list
+            else:
+                raise ValueError(f"Unknown prioritization key: {params['prioritization_key']}")
+            
+            if params.get("prioritization_sign") == "negative":
+                priorities = -priorities
+
+            priorities = jnp.where(forced_repair_mask, -jnp.inf, priorities)
+            sorted_indices = jnp.argsort(priorities, descending=True)
+            top_k_indices = sorted_indices[:top_k]
+
+            # Keep actions only for top-k priority indices
+            top_k_constrained_action = jnp.where(
+                jnp.isin(jnp.arange(len(action)), top_k_indices),
+                constrained_action,
+                do_nothing_action,
+            )
+            return top_k_constrained_action
+        
+        if params.get("top_k", False):
+            # Apply top-k constraint after budget constraint if we are not in the last timestep of a budget period
+            constrained_action = jax.lax.cond(
+                road_env.get_budget_remaining_time(road_env_state.timestep) > 1,
+                lambda: apply_top_k_constraint(),
+                lambda: constrained_action,
+            )
 
         actions_dict = {f"agent_{i}": constrained_action[i] for i in range(len(obs))}
         return actions_dict
@@ -213,46 +266,7 @@ def run_rollout(key, env, policy, num_steps):
     )
     return total_reward / episodes, dones.any(), log_wrapper_return
 
-def make_get_rollout_data(config):
-
-    # Environment
-    env = make('road_env', map_name=config['map'], record_rollout=True)
-    env = LogWrapper(env)
-
-    # Policy
-    policy_factory = globals()[f"get_policy_{config['policy']}"]
-    # Extract policy parameters if they exist
-    policy_params = config.get("policy_params", {})
-    policy = policy_factory(policy_params)
-
-    @jax.vmap
-    @jax.jit
-    def get_rollout_data(key):
-
-        def scan_step(carry, _):
-            key, last_obs, last_state = carry
-
-            key, key_act, key_step = jax.random.split(key, 3)
-            actions = policy(key_act, last_state, last_obs, env)
-            obs, state, reward, done, infos = env.step(key_step, last_state, actions)
-            return (key, obs, state), (state, actions, reward, infos)
-
-        key, key_reset, key_scan = jax.random.split(key, 3)
-        init_obs, init_state = env.reset(key_reset)
-        init_carry = (key_scan, init_obs, init_state)
-
-        #! NOTE:
-        # 1. Rollout is limited to max_timesteps
-        # 2. To include last step, env_step is used instead of step (which would
-        # otherwise reset the env when done)
-        carry, (env_state, actions, reward, infos) = jax.lax.scan(scan_step, init_carry, None, length=env.env.max_timesteps)
-
-        return init_state, env_state, actions, reward, infos
-
-    return get_rollout_data
-
-
-@hydra.main(config_path="config/heuristics", config_name="toy_example_humble_heuristic", version_base=None)
+@hydra.main(config_path="evaluation/config/heuristics/", config_name="toy_example_v2_heuristic", version_base=None)
 def main(cfg: DictConfig):
     # Log the configuration
     print(f"Configuration:\n{OmegaConf.to_yaml(OmegaConf.to_container(cfg))}")
@@ -271,7 +285,6 @@ def main(cfg: DictConfig):
     policy_params = cfg.get("policy_params", {})
     policy = policy_factory(policy_params)
 
-    # Prioritization settings are now part of policy_params
     if policy_params.get("prioritization_enabled", False):
         prio_params = dict(policy_params.prioritization_params)
         policy = get_budget_prioritized_policy(policy, prio_params)
