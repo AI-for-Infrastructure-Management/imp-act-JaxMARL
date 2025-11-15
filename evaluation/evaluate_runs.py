@@ -127,7 +127,20 @@ def evaluate_checkpoint(path, config):
     top_k = config.get('TOP_K_CHECKPOINTS') or len(all_safetensor_names)
     evaluate_checkpoints = all_safetensor_names
     if top_k < len(all_safetensor_names):
-        entity, project, run_id = get_run_from_link(train_config["WANDB_RUN_URL"])
+        run_url = train_config.get("WANDB_RUN_URL")
+        if run_url:
+            entity, project, run_id = get_run_from_link(run_url)
+        else:
+            map_name = train_config.get("ENV_KWARGS").get("map_name")
+            entity = train_config.get("ENTITY")
+            project = f"{train_config.get('PROJECT')}_{map_name}"
+            run_id = train_config.get("WANDB_RUN_ID")
+            if not (entity and project and run_id):
+                raise RuntimeError(
+                    f"Missing WANDB metadata for {path}. Please ensure ENTITY, PROJECT, and WANDB_RUN_ID "
+                    "are saved in the training config so evaluation can determine the top-k checkpoints."
+                )
+
         sweep_name = f"{train_config['ALG_NAME']}_final_run"
         run_store_path = run_data_path / f"{project}/{sweep_name}/{run_id}"
 
