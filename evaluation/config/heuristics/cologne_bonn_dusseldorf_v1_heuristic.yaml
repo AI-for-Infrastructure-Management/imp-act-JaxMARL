@@ -11,3 +11,17 @@ policy_parameters:
   prioritization_enabled: True
   prioritization_key: "cost" # Options: "segment_lengths", "cost", "volumes"
   prioritization_sign: "negative"
+
+optimization:
+  chunk_size: 5
+  parameters:
+    inspection_interval:
+      range:
+        from: 1
+        to: 50
+        step: 1
+    repair_threshold:
+      range:
+        from: 1
+        to: 5
+        step: 1

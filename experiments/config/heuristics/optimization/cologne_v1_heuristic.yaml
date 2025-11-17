@@ -15,7 +15,14 @@ policy_parameters:
 # Optimization parameters
 optimization:
   chunk_size: 5
-  interval_start: 1
-  interval_end: 50
-  threshold_start: 1
-  threshold_end: 5
+  parameters:
+    inspection_interval:
+      range:
+        from: 1
+        to: 50
+        step: 1
+    repair_threshold:
+      range:
+        from: 1
+        to: 5
+        step: 1
