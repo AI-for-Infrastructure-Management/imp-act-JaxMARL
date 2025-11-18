@@ -1,5 +1,5 @@
 map: CologneBonnDusseldorf-v1  # Options: ToyExample-v2, Cologne-v1, CologneBonnDusseldorf-v1
-policy: humble_heuristic  # Options: do_nothing, random, humble_heuristic
+policy: segment_based_heuristic  # Options: do_nothing, random, segment_based_heuristic
 num_episodes: 5000
 num_steps: 100
 norm_constant: 1e6

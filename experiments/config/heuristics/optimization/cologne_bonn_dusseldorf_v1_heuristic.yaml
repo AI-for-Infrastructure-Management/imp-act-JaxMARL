@@ -1,5 +1,5 @@
 map: CologneBonnDusseldorf-v1  # Options: ToyExample-v2, Cologne-v1, CologneBonnDusseldorf-v1
-policy: humble_heuristic  # Options: do_nothing, random, humble_heuristic
+policy: segment_based_heuristic  # Options: do_nothing, random, segment_based_heuristic
 policy_parameters:
   inspection_interval: 5  # Every n timesteps the policy will perform inspection (action 1)
   repair_threshold: 1     # When observation exceeds this value, repair action is taken (action 2)

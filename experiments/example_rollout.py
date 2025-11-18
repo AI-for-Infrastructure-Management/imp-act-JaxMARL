@@ -53,7 +53,7 @@ def policy(env_state, key):
     #     for a, agent in enumerate(env.agents)
     # }
 
-    # humble heuristic
+    # segment-based heuristic
     # best minor repair threshold: 2
     timepstep = env_state.timestep.flatten()
     observations = env_state.observation.flatten().reshape(NUM_ENVS, -1)
@@ -99,7 +99,7 @@ metrics = jax.tree.map(
 )
 
 # (numpy, do-nothing) ToyExample-v2: -1_080.811
-# (numpy, humble heuristic) ToyExample-v2: ~300
+# (numpy, segment-based heuristic) ToyExample-v2: ~300
 # (numpy, do-nothing) Cologne-v1: -19_984.037
 mean_return = metrics["returned_episode_returns"] / reward_normalization
 print(f"Map: {MAP_NAME} | Mean return: {mean_return:.2f}")

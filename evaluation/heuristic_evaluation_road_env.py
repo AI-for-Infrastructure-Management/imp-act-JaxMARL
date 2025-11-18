@@ -48,8 +48,8 @@ def get_policy_random(params=None):
         return {f"agent_{i}": actions[i] for i in range(num_agents)}
     return policy
 
-def get_policy_humble_heuristic(params):
-    """Returns a humble_heuristic policy function with configurable parameters.
+def get_policy_segment_based_heuristic(params):
+    """Returns a segment_based_heuristic policy function with configurable parameters.
     
     Args:
         params: Dictionary containing:

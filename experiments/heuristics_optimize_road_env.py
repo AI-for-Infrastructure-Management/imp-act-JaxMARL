@@ -290,7 +290,7 @@ def run_rollout(key, env, policy, num_steps):
 ################################################################################
 # 4) Main: build the parameter grid, vmap over combos & episodes, compute stats
 ################################################################################
-@hydra.main(config_path="config/heuristics", config_name="toy_example_humble_heuristic", version_base=None)
+@hydra.main(config_path="config/heuristics", config_name="toy_example_segment_based_heuristic", version_base=None)
 def main(cfg: DictConfig):
     print(f"Configuration:\n{OmegaConf.to_yaml(OmegaConf.to_container(cfg))}")
 
