@@ -29,11 +29,11 @@ optimization:
       list: ["volumes", "segment_lengths", "cost"]
     prioritization_sign:
       list: ["negative", "positive"]
-    prioritization_random_seed:
-      range:
-        from: 0
-        to: 2   
-        step: 1
     top_k:
       list: [0, 12]
       jittable: true
+
+# hydra params
+hydra:
+  run:
+    dir: outputs/${map}/segment_based_heuristic/${now:%Y-%m-%d_%H-%M-%S.%f}

@@ -25,3 +25,8 @@ optimization:
         from: 1
         to: 5
         step: 1
+        
+# hydra params
+hydra:
+  run:
+    dir: outputs/${map}/segment_based_heuristic/${now:%Y-%m-%d_%H-%M-%S.%f}

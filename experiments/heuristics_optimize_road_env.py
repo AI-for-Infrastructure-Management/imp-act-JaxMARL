@@ -10,6 +10,8 @@ import time
 import hydra
 import logging
 from omegaconf import DictConfig, OmegaConf
+import os
+import csv
 
 # Get Hydra's logger
 log = logging.getLogger(__name__)
@@ -294,6 +296,12 @@ def run_rollout(key, env, policy, num_steps):
 def main(cfg: DictConfig):
     print(f"Configuration:\n{OmegaConf.to_yaml(OmegaConf.to_container(cfg))}")
 
+    # Get Hydra output directory for this run (if available)
+    try:
+        hydra_output_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
+    except Exception:
+        hydra_output_dir = None
+
     if cfg.get("double_precision_mode", False):
         jax.config.update("jax_enable_x64", True)
         log.info("Using double precision mode")
@@ -471,8 +479,8 @@ def main(cfg: DictConfig):
         all_results.append(results_s)
         all_meta.append({"non_jitted_params": s_params})
 
-    # For simplicity, if multiple string param sets exist, we now concatenate
-    # jitted combos along axis 0 and treat each (string, jitted) combo as
+    # For simplicity, if multiple non-jitted param sets exist, we now concatenate
+    # jitted combos along axis 0 and treat each (non-jitted, jitted) combo as
     # a separate entry when ranking.
     rewards_list = []
     dones_list = []
@@ -537,6 +545,44 @@ def main(cfg: DictConfig):
             log.warning(f"Warning: Mean results from the heuristic policy and log wrapper do not match.")
         if not jnp.allclose(std_rewards[idx], std_logs[idx]):
             log.warning(f"Warning: Std results from the heuristic policy and log wrapper do not match.")
+
+    # Save full results as CSV if Hydra output dir is available
+    if hydra_output_dir is not None and rewards.shape[0] > 0:
+
+        csv_path = os.path.join(hydra_output_dir, "heuristic_optimization_results.csv")
+        log.info(f"Saving full optimization results to {csv_path}")
+
+        # Column groups: non-jitted params, jitted params, metrics
+        non_jitted_names = list(non_jitted_param_names)
+        jitted_names_local = list(jitted_names)
+
+        header = non_jitted_names + jitted_names_local + [
+            "mean_reward",
+            "std_reward",
+        ]
+
+        with open(csv_path, mode="w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
+
+            for idx in range(rewards.shape[0]):
+                meta = meta_expanded[idx]
+                nj_params = meta["non_jitted_params"]
+                jitted_idx = meta["jitted_index"]
+                jitted_vals = jitted_combos[jitted_idx]
+
+                row = []
+                for name in non_jitted_names:
+                    row.append(nj_params.get(name))
+                for i, name in enumerate(jitted_names_local):
+                    row.append(float(jitted_vals[i]))
+
+                row.extend([
+                    float(mean_rewards[idx]),
+                    float(std_rewards[idx]),
+                ])
+
+                writer.writerow(row)
 
     # If you'd like a histogram for a single combo or the best combo:
     if plot_hist:

@@ -8,3 +8,8 @@ num_steps: 50
 norm_constant: 1e6
 plot_histogram: True
 double_precision_mode: False
+
+# hydra params
+hydra:
+  run:
+    dir: outputs/${map}/heruistic_random/${now:%Y-%m-%d_%H-%M-%S.%f}

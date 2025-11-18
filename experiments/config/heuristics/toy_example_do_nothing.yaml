@@ -9,12 +9,7 @@ norm_constant: 1e6
 plot_histogram: True
 double_precision_mode: False
 
-optimization:
-  chunk_size: 1
-  parameters:
-    inspection_interval:
-      list: [6]
-      jittable: true
-    repair_threshold:
-      list: [1]
-      jittable: true
+# hydra params
+hydra:
+  run:
+    dir: outputs/${map}/heuristic_do_nothing/${now:%Y-%m-%d_%H-%M-%S.%f}
