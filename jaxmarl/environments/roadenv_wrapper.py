@@ -28,7 +28,11 @@ class RoadEnvironment_Wrapper(object):
     """Jittable abstract base class for all jaxmarl Environments."""
 
     def __init__(
-        self, map_name, encoding_type="binary", include_extra_observations: dict = {}, record_rollout: bool = False
+        self,
+        map_name,
+        encoding_type="binary",
+        include_extra_observations: dict = {},
+        record_rollout: bool = False,
     ) -> None:
         """
         num_agents (int): maximum number of agents within the environment, used to set array dimensions
@@ -36,6 +40,9 @@ class RoadEnvironment_Wrapper(object):
         self.record_rollout = record_rollout
         self.env = make(f"{map_name}-jax")
         self.map_name = map_name
+        self.include_budget = (
+            self.env.enforce_budget_constraint
+        )  # Whether to include budget in observations
         self.num_agents = self.env.total_num_segments
         self.agents = [f"agent_{a}" for a in range(self.num_agents)]
         num_damage_states = self.env.num_damage_states
@@ -59,15 +66,22 @@ class RoadEnvironment_Wrapper(object):
             agent: Box(
                 low=lowest_obs,
                 high=highest_obs,
-                shape=(num_damage_states + 2 + extra_observation_size,),
+                shape=(
+                    num_damage_states
+                    + 1  # timestep
+                    + int(self.include_budget)
+                    + extra_observation_size,
+                ),
             )
             for agent in self.agents
         }
 
         # agg. local features: num_agents * (extra_features_size + num_damage_states)
-        # global features: 1 (norm. timestep) + 1 (norm. remaining budget) = 2
+        # global features: 1 (norm. timestep) + 1 (norm. remaining budget if enabled)
         self.world_state_size = (
-            self.num_agents * (num_damage_states + extra_features_size) + 2
+            self.num_agents * (num_damage_states + extra_features_size)
+            + 1  # timestep
+            + int(self.include_budget)
         )
 
     def set_agent_encodings(self, encoding_type):
@@ -215,43 +229,44 @@ class RoadEnvironment_Wrapper(object):
         """
         Applies observation function to state.
         Returns the observation for each agent as an array.
-        Shape: (num_agents, num_damage_states + 2)
-        The last two dimensions are the normalized timestep and budget.
+        Shape: (num_agents, num_damage_states + 1 + include_budget)
+        The last one or two dimensions are the normalized timestep and, optionally, budget.
         """
         N = self.env.total_num_segments
         _timestep = jnp.full((N, 1), state.timestep / self.env.max_timesteps)
-        _budget = jnp.full((N, 1), state.budget_remaining / self.env.budget_amount)
-        return jnp.concatenate(
-            [
-                state.belief,
-                _timestep,
-                _budget,
-                self.agent_encodings,
-                self.segment_lengths_obs,
-                self.volume_ratio_obs,
-                self.capacity_obs,
-            ],
-            axis=1,
-        )
+        obs = [
+            state.belief,
+            _timestep,
+            self.agent_encodings,
+            self.segment_lengths_obs,
+            self.volume_ratio_obs,
+            self.capacity_obs,
+        ]
+        if self.include_budget:
+            normalized_budget = jnp.array(
+                [state.budget_remaining / self.env.budget_amount], dtype=jnp.float32
+            )
+            budget_column = jnp.full((N, 1), normalized_budget)
+            obs.append(budget_column)
+        return jnp.concatenate(obs, axis=1)
 
     def get_global_state(self, obs, state: State) -> Dict[str, chex.Array]:
         _timestep = jnp.array(
             [state.timestep / self.env.max_timesteps], dtype=jnp.float32
         )
-        _budget = jnp.array(
-            [state.budget_remaining / self.env.budget_amount], dtype=jnp.float32
-        )
-        return jnp.concatenate(
-            [
-                state.belief.flatten(),
-                _timestep,
-                _budget,
-                self.segment_lengths_obs.flatten(),
-                self.volume_ratio_obs.flatten(),
-                self.capacity_obs.flatten(),
-            ],
-            axis=0,
-        )
+        global_state = [
+            state.belief.flatten(),
+            _timestep,
+            self.segment_lengths_obs.flatten(),
+            self.volume_ratio_obs.flatten(),
+            self.capacity_obs.flatten(),
+        ]
+        if self.include_budget:
+            normalized_budget = jnp.array(
+                [state.budget_remaining / self.env.budget_amount], dtype=jnp.float32
+            )
+            global_state.append(normalized_budget)
+        return jnp.concatenate(global_state, axis=0)
 
     def observation_space(self, agent=None):
         """
