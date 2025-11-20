@@ -237,17 +237,18 @@ class RoadEnvironment_Wrapper(object):
         obs = [
             state.belief,
             _timestep,
-            self.agent_encodings,
-            self.segment_lengths_obs,
-            self.volume_ratio_obs,
-            self.capacity_obs,
         ]
         if self.include_budget:
-            normalized_budget = jnp.array(
-                [state.budget_remaining / self.env.budget_amount], dtype=jnp.float32
-            )
-            budget_column = jnp.full((N, 1), normalized_budget)
-            obs.append(budget_column)
+            _budget = jnp.full((N, 1), state.budget_remaining / self.env.budget_amount)
+            obs.append(_budget)
+        obs.append(
+            [
+                self.agent_encodings,
+                self.segment_lengths_obs,
+                self.volume_ratio_obs,
+                self.capacity_obs,
+            ]
+        )
         return jnp.concatenate(obs, axis=1)
 
     def get_global_state(self, obs, state: State) -> Dict[str, chex.Array]:
@@ -257,15 +258,19 @@ class RoadEnvironment_Wrapper(object):
         global_state = [
             state.belief.flatten(),
             _timestep,
-            self.segment_lengths_obs.flatten(),
-            self.volume_ratio_obs.flatten(),
-            self.capacity_obs.flatten(),
         ]
         if self.include_budget:
-            normalized_budget = jnp.array(
+            _budget = jnp.array(
                 [state.budget_remaining / self.env.budget_amount], dtype=jnp.float32
             )
-            global_state.append(normalized_budget)
+            global_state.append(_budget)
+        global_state.append(
+            [
+                self.segment_lengths_obs.flatten(),
+                self.volume_ratio_obs.flatten(),
+                self.capacity_obs.flatten(),
+            ]
+        )
         return jnp.concatenate(global_state, axis=0)
 
     def observation_space(self, agent=None):
