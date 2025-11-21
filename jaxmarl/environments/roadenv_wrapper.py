@@ -241,7 +241,7 @@ class RoadEnvironment_Wrapper(object):
         if self.include_budget:
             _budget = jnp.full((N, 1), state.budget_remaining / self.env.budget_amount)
             obs.append(_budget)
-        obs.append(
+        obs.extend(
             [
                 self.agent_encodings,
                 self.segment_lengths_obs,
@@ -264,7 +264,7 @@ class RoadEnvironment_Wrapper(object):
                 [state.budget_remaining / self.env.budget_amount], dtype=jnp.float32
             )
             global_state.append(_budget)
-        global_state.append(
+        global_state.extend(
             [
                 self.segment_lengths_obs.flatten(),
                 self.volume_ratio_obs.flatten(),
