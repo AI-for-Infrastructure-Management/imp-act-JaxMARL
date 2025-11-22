@@ -4,27 +4,32 @@ policy_parameters:
   inspection_interval: 5  # Every n timesteps the policy will perform inspection (action 1)
   repair_threshold: 1     # When observation exceeds this value, repair action is taken (action 2)
   prioritization_enabled: True
-  prioritization_key: "cost" # Options: "segment_lengths", "cost", "volumes"
+  prioritization_key: "segment_lengths" # Options: "segment_lengths", "cost", "volumes"
   prioritization_sign: "negative"
-num_episodes: 5000
+num_envs: 5000
 num_steps: 100
 norm_constant: 1e6
 plot_histogram: False
 double_precision_mode: False
 
 optimization:
-  chunk_size: 5
+  chunk_size: 1
   parameters:
     inspection_interval:
       range:
         from: 1
         to: 50
-        step: 1
+        step: 5
     repair_threshold:
       range:
         from: 1
-        to: 5
+        to: 4
         step: 1
+    top_k:
+      range:
+        from: 170
+        to: 178
+        step: 2
         
 # hydra params
 hydra:

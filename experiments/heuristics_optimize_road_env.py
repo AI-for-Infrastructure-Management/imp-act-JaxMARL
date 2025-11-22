@@ -40,7 +40,7 @@ def parametric_heuristic_policy(interval, threshold):
         actions = jnp.where(tstep % interval == 0, 1, actions)
 
         # Step 3: if obs_insp > threshold => action 2 (priority)
-        actions = jnp.where(obs_insp > threshold, 2, actions)
+        actions = jnp.where(obs_insp >= threshold, 2, actions)
 
         actions_dict = {f"agent_{i}": actions[i] for i in range(env.num_agents)}
         return actions_dict
@@ -308,7 +308,7 @@ def main(cfg: DictConfig):
 
     # Extract configuration
     MAP_NAME = cfg.map
-    NUM_EPISODES = cfg.num_episodes
+    NUM_ENVS = cfg.num_envs
     NUM_STEPS = cfg.num_steps
     NORM_CONSTANT = cfg.norm_constant
     CHUNK_SIZE = cfg.optimization.chunk_size
@@ -406,9 +406,9 @@ def main(cfg: DictConfig):
     # Now we need random keys for each (jitted_combo, episode).
     # So in total, we need num_jitted_combos * NUM_EPISODES distinct keys.
     key = jax.random.PRNGKey(0)
-    all_keys = jax.random.split(key, num_jitted_combos * NUM_EPISODES)
+    all_keys = jax.random.split(key, num_jitted_combos * NUM_ENVS)
     # Reshape to (num_jitted_combos, NUM_EPISODES).
-    all_keys = all_keys.reshape(num_jitted_combos, NUM_EPISODES, 2)
+    all_keys = all_keys.reshape(num_jitted_combos, NUM_ENVS, 2)
 
     env = make('road_env', map_name=MAP_NAME)
     env = LogWrapper(env)
@@ -498,9 +498,9 @@ def main(cfg: DictConfig):
                 "jitted_index": n_idx,
             })
 
-    rewards = jnp.concatenate(rewards_list, axis=0) if rewards_list else jnp.zeros((0, NUM_EPISODES))
-    dones = jnp.concatenate(dones_list, axis=0) if dones_list else jnp.zeros((0, NUM_EPISODES), dtype=bool)
-    logs = jnp.concatenate(logs_list, axis=0) if logs_list else jnp.zeros((0, NUM_EPISODES))
+    rewards = jnp.concatenate(rewards_list, axis=0) if rewards_list else jnp.zeros((0, NUM_ENVS))
+    dones = jnp.concatenate(dones_list, axis=0) if dones_list else jnp.zeros((0, NUM_ENVS), dtype=bool)
+    logs = jnp.concatenate(logs_list, axis=0) if logs_list else jnp.zeros((0, NUM_ENVS))
 
     end_time = time.time()
     log.info(f"Evaluation completed in {end_time - start_time:.2f} seconds")

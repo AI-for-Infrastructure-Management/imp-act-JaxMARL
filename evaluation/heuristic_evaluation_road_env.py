@@ -71,7 +71,7 @@ def get_policy_segment_based_heuristic(params):
         # Step 2: Apply condition for inspection based on configured interval
         actions = jnp.where(tstep % inspection_interval == 0, 1, actions)
         # Step 3: Apply condition for repair based on configured threshold
-        actions = jnp.where(obs_insp > repair_threshold, 2, actions)
+        actions = jnp.where(obs_insp >= repair_threshold, 2, actions)
 
         actions_dict = {f"agent_{i}": actions[i] for i in range(env.num_agents)}
         return actions_dict
@@ -288,7 +288,7 @@ def main(cfg: DictConfig):
     if policy_params.get("prioritization_enabled", False):
         policy = get_budget_prioritized_policy(policy, policy_params)
 
-    NUM_EPISODES = cfg.num_episodes
+    NUM_ENVS = cfg.num_envs
     NUM_STEPS = cfg.num_steps
     NORM_CONSTANT = cfg.norm_constant
 
@@ -308,7 +308,7 @@ def main(cfg: DictConfig):
         static_argnums=(1,2,3),
     )
 
-    keys = jax.random.split(key_rollout, NUM_EPISODES)
+    keys = jax.random.split(key_rollout, NUM_ENVS)
 
     # === TIMING START ===
     start = time.perf_counter()
@@ -328,7 +328,7 @@ def main(cfg: DictConfig):
     std_reward = jax.numpy.std(results)
     log_wrapper_std_reward = jnp.std(log_wrapper_return)
 
-    log.info(f"Total number of runs: {NUM_EPISODES}")
+    log.info(f"Total number of runs: {NUM_ENVS}")
 
     log.info(f"Total reward: {mean_reward / NORM_CONSTANT:.6f}")
     log.info(f"Std reward: {std_reward / NORM_CONSTANT:.6f}")

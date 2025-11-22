@@ -1,4 +1,4 @@
-map: Cologne-v1  # Options: ToyExample-v2, Cologne-v1, CologneBonnDusseldorf-v1
+map: Cologne-v1-critical-budget  # Options: ToyExample-v2, Cologne-v1, CologneBonnDusseldorf-v1
 policy: segment_based_heuristic  # Options: do_nothing, random, segment_based_heuristic
 num_envs: 10000
 num_steps: 50
@@ -35,6 +35,7 @@ optimization:
         from: 50
         to: 60
         step: 1
+
 # hydra params
 hydra:
   run:
