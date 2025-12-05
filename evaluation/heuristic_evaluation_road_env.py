@@ -266,6 +266,44 @@ def run_rollout(key, env, policy, num_steps):
     )
     return total_reward / episodes, dones.any(), log_wrapper_return
 
+def make_get_rollout_data(config):
+
+    # Environment
+    env = make('road_env', map_name=config['map'], record_rollout=True)
+    env = LogWrapper(env)
+
+    # Policy
+    policy_factory = globals()[f"get_policy_{config['policy']}"]
+    # Extract policy parameters if they exist
+    policy_params = config.get("policy_params", {})
+    policy = policy_factory(policy_params)
+
+    @jax.vmap
+    @jax.jit
+    def get_rollout_data(key):
+
+        def scan_step(carry, _):
+            key, last_obs, last_state = carry
+
+            key, key_act, key_step = jax.random.split(key, 3)
+            actions = policy(key_act, last_state, last_obs, env)
+            obs, state, reward, done, infos = env.step(key_step, last_state, actions)
+            return (key, obs, state), (state, actions, reward, infos)
+
+        key, key_reset, key_scan = jax.random.split(key, 3)
+        init_obs, init_state = env.reset(key_reset)
+        init_carry = (key_scan, init_obs, init_state)
+
+        #! NOTE:
+        # 1. Rollout is limited to max_timesteps
+        # 2. To include last step, env_step is used instead of step (which would
+        # otherwise reset the env when done)
+        carry, (env_state, actions, reward, infos) = jax.lax.scan(scan_step, init_carry, None, length=env.env.max_timesteps)
+
+        return init_state, env_state, actions, reward, infos
+
+    return get_rollout_data
+
 @hydra.main(config_path="config/heuristics/", config_name="toy_example_v2_heuristic", version_base=None)
 def main(cfg: DictConfig):
     # Log the configuration

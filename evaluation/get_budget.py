@@ -124,8 +124,8 @@ def visualize_periodic_metrics(period_stats, rounded_budgets):
 
 
 @hydra.main(
-    config_path="../experiments/config/heuristics/best_parameters",
-    config_name="toy_example_v2_heuristic",
+    config_path="config/heuristics/",
+    config_name="toy_example_v2_unconstrained_heuristic",
     version_base=None,
 )
 def main(cfg: DictConfig):
