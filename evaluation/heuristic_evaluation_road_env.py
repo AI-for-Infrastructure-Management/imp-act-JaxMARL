@@ -56,8 +56,13 @@ def get_policy_segment_based_heuristic(params):
             - inspection_interval: Timestep interval for inspection (action 1)
             - repair_threshold: Observation threshold above which repair action is taken (action 2)
     """
-    inspection_interval = params.get("inspection_interval", 6)
-    repair_threshold = params.get("repair_threshold", 1)
+    inspection_interval = params.get("inspection_interval", None)
+    repair_threshold = params.get("repair_threshold", None)
+
+    if inspection_interval is None or repair_threshold is None:
+        raise ValueError(
+            "Both 'inspection_interval' and 'repair_threshold' must be provided in params."
+        )
     
     def policy(key, state, obs, env):
         """Policy that inspects at specified intervals and repairs when observation exceeds threshold."""
@@ -275,7 +280,7 @@ def make_get_rollout_data(config):
     # Policy
     policy_factory = globals()[f"get_policy_{config['policy']}"]
     # Extract policy parameters if they exist
-    policy_params = config.get("policy_params", {})
+    policy_params = config.get("policy_parameters", None)
     policy = policy_factory(policy_params)
 
     @jax.vmap
