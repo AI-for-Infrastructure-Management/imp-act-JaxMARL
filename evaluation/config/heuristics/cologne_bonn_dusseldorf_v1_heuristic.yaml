@@ -1,0 +1,19 @@
+map: CologneBonnDusseldorf-v1  # Options: ToyExample-v2, Cologne-v1, CologneBonnDusseldorf-v1
+policy: segment_based_heuristic  # Options: do_nothing, random, segment_based_heuristic
+num_envs: 5000
+num_steps: 100
+norm_constant: 1e6
+plot_histogram: False
+double_precision_mode: False
+policy_parameters:
+  inspection_interval: 46  # Every n timesteps the policy will perform inspection (action 1)
+  repair_threshold: 2     # When observation exceeds this value, repair action is taken (action 2)
+  prioritization_enabled: True
+  prioritization_key: "segment_lengths" # Options: "segment_lengths", "cost", "volumes"
+  prioritization_sign: "negative"
+  top_k: 174
+
+# hydra params
+hydra:
+  run:
+    dir: outputs/${map}/segment_based_heuristic/eval/${now:%Y-%m-%d_%H-%M-%S.%f}

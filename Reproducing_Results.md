@@ -181,7 +181,7 @@ Where
 To evaluate the baseline heuristics used in the paper, use the following command:
 
 ```bash
-python experiments/heuristic_evaluation_road_env.py --config-path "config/heuristics/best_parameters/" --config-name "{ENV}_heuristic"
+python evaluation/heuristic_evaluation_road_env.py --config-path "evaluation/config/heuristics/" --config-name "{ENV}_heuristic"
 ``` 
 
 Where 
