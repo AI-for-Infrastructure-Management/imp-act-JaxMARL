@@ -30,7 +30,7 @@
 
 # evaluate
 "TEST_DURING_TRAINING": True
-"TEST_INTERVAL": 0.005 # as a fraction of updates
+"TEST_INTERVAL": 0.01 # as a fraction of updates
 "TEST_NUM_STEPS": 50
 "TEST_NUM_ENVS": 1000
 
