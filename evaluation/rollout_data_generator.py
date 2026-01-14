@@ -133,11 +133,35 @@ class RolloutDataGenerator:
             .iloc[0]
         )
 
-        self.checkpoint_dir = _runs["checkpoint_dir_name"]
-        self.checkpoint_id = _runs["checkpoint_id"]
-        print(
-            f"Checkpoint dir: {self.checkpoint_dir}, checkpoint id: {self.checkpoint_id}"
-        )
+        # Extract the run directory name from any absolute path that includes
+        # .../outputs/<env>/<alg>/<run_dir>
+        raw_dir = str(_runs["checkpoint_dir_name"]) if "checkpoint_dir_name" in _runs else ""
+        run_dir = raw_dir
+        outputs_path = None
+        if "outputs/" in raw_dir:
+            try:
+                # Keep the portion after 'outputs/': '<env>/<alg>/<run_dir>'
+                suffix = raw_dir.split("outputs/", 1)[1].strip("/")
+                outputs_path = f"outputs/{suffix}"
+                parts = suffix.split("/")
+                # Expect at least: env, alg, run_dir
+                if len(parts) >= 3:
+                    run_dir = parts[2]
+                else:
+                    run_dir = os.path.basename(raw_dir.rstrip("/"))
+            except Exception:
+                run_dir = os.path.basename(raw_dir.rstrip("/"))
+        else:
+            # Fallback to basename if path does not contain 'outputs/'
+            run_dir = os.path.basename(raw_dir.rstrip("/"))
+
+        self.checkpoint_dir = run_dir
+        self.checkpoint_id = int(_runs["checkpoint_id"]) if "checkpoint_id" in _runs else None
+
+        # Verbose prints of source and extracted paths
+        if outputs_path:
+            print(f"Extracted outputs path: {outputs_path}")
+        print(f"Using run dir: {self.checkpoint_dir}, checkpoint id: {self.checkpoint_id}")
 
     def generate_rollout_data(self, key, verbose=False):
         """
