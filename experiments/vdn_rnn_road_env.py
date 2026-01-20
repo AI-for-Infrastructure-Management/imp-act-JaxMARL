@@ -1,10 +1,11 @@
 """
-This file was adapted from the original in the process of creating the 
-imp-act adaption of JaxMARL under the 
+This file was adapted from the original in the process of creating the
+imp-act adaption of JaxMARL under the
 [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
 
 Original file: baselines/QLearning/vdn_rnn.py
 """
+
 import os
 import copy
 import jax
@@ -33,6 +34,7 @@ from jaxmarl.wrappers.baselines import (
     CTRolloutManager,
     save_params,
 )
+
 
 class ScannedRNN(nn.Module):
 
@@ -98,11 +100,11 @@ class RNNQNetwork(nn.Module):
 
 @chex.dataclass(frozen=True)
 class Timestep:
-    obs: dict
-    actions: dict
-    rewards: dict
-    dones: dict
-    avail_actions: dict
+    obs: chex.Array
+    actions: chex.Array
+    rewards: chex.Array
+    dones: chex.Array
+    avail_actions: chex.Array
 
 
 class CustomTrainState(TrainState):
@@ -111,11 +113,13 @@ class CustomTrainState(TrainState):
     n_updates: int = 0
     grad_steps: int = 0
 
+
 @chex.dataclass
 class RunningStats:
     count: jnp.ndarray  # or float32
     mean: jnp.ndarray
     M2: jnp.ndarray
+
 
 def init_running_stats():
     return RunningStats(
@@ -124,8 +128,9 @@ def init_running_stats():
         M2=jnp.array(0.0, dtype=jnp.float32),
     )
 
+
 def update_running_stats(stats: RunningStats, x: jnp.ndarray) -> RunningStats:
-    x = x.astype(jnp.float32)        # if x might be float64
+    x = x.astype(jnp.float32)  # if x might be float64
     batch_count = x.size
     batch_sum = jnp.sum(x)
     batch_mean = batch_sum / batch_count
@@ -141,8 +146,10 @@ def update_running_stats(stats: RunningStats, x: jnp.ndarray) -> RunningStats:
     )
     return RunningStats(count=new_count, mean=new_mean, M2=new_M2)
 
+
 def get_std(stats: RunningStats) -> jnp.ndarray:
     return jnp.sqrt(stats.M2 / (stats.count + 1e-8))
+
 
 def make_train(config, env):
 
@@ -189,18 +196,14 @@ def make_train(config, env):
         )
         return chosed_actions
 
-    def batchify(x: dict):
-        return jnp.stack([x[agent] for agent in env.agents], axis=0)
-
-    def unbatchify(x: jnp.ndarray):
-        return {agent: x[i] for i, agent in enumerate(env.agents)}
-
     def train(rng):
 
         # INIT ENV
         original_seed = rng[0]
         rng, _rng = jax.random.split(rng)
-        wrapped_env = CTRolloutManager(env, batch_size=config["NUM_ENVS"], preprocess_obs=False)
+        wrapped_env = CTRolloutManager(
+            env, batch_size=config["NUM_ENVS"], preprocess_obs=False
+        )
         test_env = CTRolloutManager(
             env, batch_size=config["TEST_NUM_ENVS"], preprocess_obs=False
         )  # batched env for testing (has different batch size)
@@ -254,11 +257,12 @@ def make_train(config, env):
             rng, key_a, key_s = jax.random.split(
                 jax.random.PRNGKey(0), 3
             )  # use a dummy rng here
-            key_a = jax.random.split(key_a, env.num_agents)
-            actions = {
-                agent: wrapped_env.batch_sample(key_a[i], agent)
-                for i, agent in enumerate(env.agents)
-            }
+            actions = jax.random.randint(
+                key_a,
+                (env.num_agents, config["NUM_ENVS"]),
+                0,
+                wrapped_env.max_action_space,
+            )
             avail_actions = wrapped_env.get_valid_actions(env_state.env_state)
             obs, env_state, rewards, dones, infos = wrapped_env.batch_step(
                 key_s, env_state, actions
@@ -277,7 +281,7 @@ def make_train(config, env):
             _env_sample_step, _env_state, None, config["NUM_STEPS"]
         )
         sample_traj_unbatched = jax.tree.map(
-            lambda x: x[:, 0], sample_traj
+            lambda x: x[:, :, 0], sample_traj
         )  # remove the NUM_ENV dim
         buffer = fbx.make_trajectory_buffer(
             max_length_time_axis=int(config["BUFFER_SIZE"] // config["NUM_ENVS"]),
@@ -300,8 +304,8 @@ def make_train(config, env):
                 rng, rng_a, rng_s = jax.random.split(rng, 3)
 
                 # (num_agents, 1 (dummy time), num_envs, obs_size)
-                _obs = batchify(last_obs)[:, np.newaxis]
-                _dones = batchify(last_dones)[:, np.newaxis]
+                _obs = last_obs[:, np.newaxis]
+                _dones = last_dones[:, np.newaxis]
 
                 new_hs, q_vals = jax.vmap(
                     network.apply, in_axes=(None, 0, 0, 0)
@@ -321,7 +325,7 @@ def make_train(config, env):
                 eps = eps_scheduler(train_state.n_updates)
                 _rngs = jax.random.split(rng_a, env.num_agents)
                 actions = jax.vmap(eps_greedy_exploration, in_axes=(0, 0, None, 0))(
-                    _rngs, q_vals, eps, batchify(avail_actions)
+                    _rngs, q_vals, eps, avail_actions
                 )
 
                 # Replace all actions with 0
@@ -329,15 +333,13 @@ def make_train(config, env):
                 # actions = jax.tree.map(lambda x: jnp.full_like(x, 2), actions)
 
                 # jax.debug.breakpoint()
-                actions = unbatchify(actions)
-
                 new_obs, new_env_state, rewards, dones, infos = wrapped_env.batch_step(
                     rng_s, env_state, actions
                 )
                 timestep = Timestep(
                     obs=last_obs,
                     actions=actions,
-                    rewards=jax.tree.map(lambda x:config.get("REW_SCALE", 1)*x, rewards),
+                    rewards=config.get("REW_SCALE", 1) * rewards,
                     dones=last_dones,
                     avail_actions=avail_actions,
                 )
@@ -346,10 +348,7 @@ def make_train(config, env):
             # step the env (should be a complete rollout)
             rng, _rng = jax.random.split(rng)
             init_obs, env_state = wrapped_env.batch_reset(_rng)
-            init_dones = {
-                agent: jnp.zeros((config["NUM_ENVS"]), dtype=bool)
-                for agent in env.agents + ["__all__"]
-            }
+            init_dones = jnp.zeros((len(env.agents), config["NUM_ENVS"]), dtype=bool)
             init_hs = ScannedRNN.initialize_carry(
                 config["HIDDEN_SIZE"], len(env.agents), config["NUM_ENVS"]
             )
@@ -369,11 +368,12 @@ def make_train(config, env):
 
             # BUFFER UPDATE
             buffer_traj_batch = jax.tree.map(
-                lambda x: jnp.swapaxes(x, 0, 1)[
-                    :, np.newaxis
-                ],  # put the batch dim first and add a dummy sequence dim
+                # x                 : (T, A, E, ...)
+                # moveaxis(2 → 0)   : (E, T, A, ...)
+                # add new axis      : (E, 1, T, A, ...)
+                lambda x: jnp.moveaxis(x, 2, 0)[:, np.newaxis],
                 timesteps,
-            )  # (num_envs, 1, time_steps, ...)
+            )  # put env batch first and add a dummy sequence dim
             buffer_state = buffer.add(buffer_state, buffer_traj_batch)
 
             # NETWORKS UPDATE
@@ -395,11 +395,10 @@ def make_train(config, env):
                     config["BUFFER_BATCH_SIZE"],
                 )
                 # num_agents, timesteps, batch_size, ...
-                _obs = batchify(minibatch.obs)
-                _dones = batchify(minibatch.dones)
-                _actions = batchify(minibatch.actions)
-                #_rewards = batchify(minibatch.rewards)
-                _avail_actions = batchify(minibatch.avail_actions)
+                _obs = jnp.moveaxis(minibatch.obs, 2, 0)
+                _dones = jnp.moveaxis(minibatch.dones, 2, 0)
+                _actions = jnp.moveaxis(minibatch.actions, 2, 0)
+                _avail_actions = jnp.moveaxis(minibatch.avail_actions, 2, 0)
 
                 _, q_next_target = jax.vmap(network.apply, in_axes=(None, 0, 0, 0))(
                     train_state.target_network_params,
@@ -409,7 +408,7 @@ def make_train(config, env):
                 )  # (num_agents, timesteps, batch_size, num_actions)
 
                 # --- REWARD STANDARDIZATION ---
-                rewards = minibatch.rewards["__all__"][:-1]
+                rewards = minibatch.rewards[:, :, 0][:-1]
                 rewards_flat = jnp.ravel(rewards)
                 new_rnorm = update_running_stats(rnorm, rewards_flat)
                 std = get_std(new_rnorm)
@@ -429,7 +428,9 @@ def make_train(config, env):
                         q_vals,
                         _actions[..., np.newaxis],
                         axis=-1,
-                    ).squeeze(-1)  # (num_agents, timesteps, batch_size,)
+                    ).squeeze(
+                        -1
+                    )  # (num_agents, timesteps, batch_size,)
 
                     unavailable_actions = 1 - _avail_actions
                     valid_q_vals = q_vals - (unavailable_actions * 1e10)
@@ -439,13 +440,15 @@ def make_train(config, env):
                         q_next_target,
                         jnp.argmax(valid_q_vals, axis=-1)[..., np.newaxis],
                         axis=-1,
-                    ).squeeze(-1)  # (num_agents, timesteps, batch_size,)
+                    ).squeeze(
+                        -1
+                    )  # (num_agents, timesteps, batch_size,)
 
                     vdn_target = (
                         # minibatch.rewards["__all__"][:-1]
                         rewards_norm
                         + (
-                            1 - minibatch.dones["__all__"][:-1]
+                            1 - minibatch.dones[:, :, 0][:-1]
                         )  # use next done because last done was saved for rnn re-init
                         * config["GAMMA"]
                         * jnp.sum(q_next, axis=0)[1:]  # sum over agents
@@ -523,7 +526,7 @@ def make_train(config, env):
                     )
                 ),
                 {
-                    "returned_episode": infos["returned_episode"], 
+                    "returned_episode": infos["returned_episode"],
                     "returned_episode_lengths": infos["returned_episode_lengths"],
                     "returned_episode_returns": infos["returned_episode_returns"],
                 },
@@ -547,13 +550,18 @@ def make_train(config, env):
             if config["WANDB_MODE"] != "disabled":
 
                 def callback(metrics, original_seed):
-                    if config.get('WANDB_LOG_ALL_SEEDS', False):
+                    if config.get("WANDB_LOG_ALL_SEEDS", False):
                         metrics.update(
-                            {f"rng{int(original_seed)}/{k}": v for k, v in metrics.items()}
+                            {
+                                f"rng{int(original_seed)}/{k}": v
+                                for k, v in metrics.items()
+                            }
                         )
-                    metrics_conversion = {k:float(v) for k,v in metrics.items()}
+                    metrics_conversion = {k: float(v) for k, v in metrics.items()}
                     try:
-                        metrics_conversion["gpu_stats"] = jax.devices()[0].memory_stats()
+                        metrics_conversion["gpu_stats"] = jax.devices()[
+                            0
+                        ].memory_stats()
                     except IndexError:
                         pass
                     wandb.log(metrics_conversion, step=metrics["update_steps"])
@@ -587,11 +595,12 @@ def make_train(config, env):
                 return None
 
             params = train_state.params
+
             def _greedy_env_step(step_state, unused):
                 params, env_state, last_obs, last_dones, hstate, rng = step_state
                 rng, key_s = jax.random.split(rng)
-                _obs = batchify(last_obs)[:, np.newaxis]
-                _dones = batchify(last_dones)[:, np.newaxis]
+                _obs = last_obs[:, np.newaxis]
+                _dones = last_dones[:, np.newaxis]
                 hstate, q_vals = jax.vmap(network.apply, in_axes=(None, 0, 0, 0))(
                     params,
                     hstate,
@@ -600,11 +609,10 @@ def make_train(config, env):
                 )
                 q_vals = q_vals.squeeze(axis=1)
                 valid_actions = test_env.get_valid_actions(env_state.env_state)
-                actions = get_greedy_actions(q_vals, batchify(valid_actions))
+                actions = get_greedy_actions(q_vals, valid_actions)
 
                 # actions = jax.tree.map(lambda x: jnp.full_like(x, 2), actions)
                 # actions = jax.tree.map(lambda x: jnp.zeros_like(x), actions)
-                actions = unbatchify(actions)
                 obs, env_state, rewards, dones, infos = test_env.batch_step(
                     key_s, env_state, actions
                 )
@@ -613,10 +621,9 @@ def make_train(config, env):
 
             rng, _rng = jax.random.split(rng)
             init_obs, env_state = test_env.batch_reset(_rng)
-            init_dones = {
-                agent: jnp.zeros((config["TEST_NUM_ENVS"]), dtype=bool)
-                for agent in env.agents + ["__all__"]
-            }
+            init_dones = jnp.zeros(
+                (len(env.agents), config["TEST_NUM_ENVS"]), dtype=bool
+            )
             rng, _rng = jax.random.split(rng)
             hstate = ScannedRNN.initialize_carry(
                 config["HIDDEN_SIZE"], len(env.agents), config["TEST_NUM_ENVS"]
@@ -641,7 +648,7 @@ def make_train(config, env):
                     )
                 ),
                 {
-                    "returned_episode": infos["returned_episode"], 
+                    "returned_episode": infos["returned_episode"],
                     "returned_episode_lengths": infos["returned_episode_lengths"],
                     "returned_episode_returns": infos["returned_episode_returns"],
                 },
@@ -651,21 +658,20 @@ def make_train(config, env):
 
         def checkpoint_model(vmapped_seed, train_state, step, rnorm):
             save_dir = os.path.join(
-                config["HYDRA_PATH"],
-                'checkpoints',
-                str(vmapped_seed)
+                config["HYDRA_PATH"], "checkpoints", str(vmapped_seed)
             )
             os.makedirs(save_dir, exist_ok=True)
 
             update_step_length = int(np.ceil(np.log10(config["NUM_UPDATES"])))
 
-            save_path = os.path.join(save_dir, f'checkpoint_{step:0{update_step_length}}.safetensors')
+            save_path = os.path.join(
+                save_dir, f"checkpoint_{step:0{update_step_length}}.safetensors"
+            )
 
             params = train_state.params
 
             metadata = {
-                "rnorm": 
-                {
+                "rnorm": {
                     "mean": rnorm.mean.item(),
                     "M2": rnorm.M2.item(),
                     "count": rnorm.count.item(),
@@ -685,7 +691,13 @@ def make_train(config, env):
 
         # train
         rng, _rng = jax.random.split(rng)
-        runner_state = (train_state, buffer_state, test_state, _rng, init_running_stats())
+        runner_state = (
+            train_state,
+            buffer_state,
+            test_state,
+            _rng,
+            init_running_stats(),
+        )
 
         runner_state, metrics = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
@@ -706,9 +718,9 @@ def single_run(config):
     alg_name = config.get("ALG_NAME", "vdn_rnn")
 
     map_name = config["ENV_KWARGS"].get("map_name", "default")
-    
+
     config["HYDRA_PATH"] = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-    
+
     wandb.init(
         entity=config["ENTITY"],
         project=f"{config['PROJECT']}_{map_name}",
@@ -733,7 +745,6 @@ def single_run(config):
 
     if config["SEED"] == "random":
         config["SEED"] = np.random.randint(0, 2**32 - 1)
-    
 
     map_name = config["ENV_KWARGS"].get("map_name", "default")
 
@@ -749,10 +760,7 @@ def single_run(config):
 
     OmegaConf.save(
         config,
-        os.path.join(
-            config["HYDRA_PATH"],
-            'config.yaml'
-        ),
+        os.path.join(config["HYDRA_PATH"], "config.yaml"),
     )
 
     rng = jax.random.PRNGKey(config["SEED"])
@@ -776,14 +784,16 @@ def tune(default_config):
         for k, v in dict(wandb.config).items():
             config[k] = v
 
-        config["TOTAL_TIMESTEPS"] = config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
+        config["TOTAL_TIMESTEPS"] = (
+            config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
+        )
 
         if config["SEED"] == "random":
             seed = np.random.randint(0, 2**32 - 1)
             config["SAMPLED_SEED"] = seed
         else:
             seed = config["SEED"]
-        
+
         wandb.config.update(config)
 
         print("running experiment with params:", config)
@@ -832,7 +842,7 @@ def tune(default_config):
             "GAMMA": {
                 "values": [0.9, 0.99, 1.0],
             },
-            "TARGET_UPDATE_INTERVAL" : {
+            "TARGET_UPDATE_INTERVAL": {
                 "values": [8, 16, 32, 64],
             },
         },
@@ -848,7 +858,7 @@ def tune(default_config):
 @hydra.main(version_base=None, config_path="./config", config_name="vdn_rnn_road_env")
 def main(config):
     config = OmegaConf.to_container(config)
-    
+
     print(jax.devices())
 
     if config.get("DOUBLE_PRECISION_MODE", False):

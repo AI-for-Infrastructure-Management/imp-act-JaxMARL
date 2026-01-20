@@ -43,9 +43,6 @@ class JaxMARLWrapper(object):
     #     x = jnp.stack([x[a] for a in self._env.agents])
     #     return x.reshape((self._env.num_agents, -1))
 
-    def _batchify_floats(self, x: dict):
-        return jnp.stack([x[a] for a in self._env.agents])
-
 
 @struct.dataclass
 class LogEnvState:
@@ -87,8 +84,8 @@ class LogWrapper(JaxMARLWrapper):
         obs, env_state, reward, done, info = self._env.step(
             key, state.env_state, action
         )
-        ep_done = done["__all__"]
-        new_episode_return = state.episode_returns + self._batchify_floats(reward)
+        ep_done = done[0]
+        new_episode_return = state.episode_returns + reward
         new_episode_length = state.episode_lengths + 1
         state = LogEnvState(
             env_state=env_state,
@@ -157,8 +154,8 @@ class OvercookedV2LogWrapper(JaxMARLWrapper):
         obs, env_state, reward, done, info = self._env.step(
             key, state.env_state, action
         )
-        ep_done = done["__all__"]
-        new_episode_return = state.episode_returns + self._batchify_floats(reward)
+        ep_done = done[0]
+        new_episode_return = state.episode_returns + reward
         new_episode_length = state.episode_lengths + 1
 
         updated_recipe_returns = {
@@ -205,11 +202,9 @@ class MPELogWrapper(LogWrapper):
         obs, env_state, reward, done, info = self._env.step(
             key, state.env_state, action
         )
-        rewardlog = jax.tree.map(
-            lambda x: x * self._env.num_agents, reward
-        )  # As per on-policy codebase
-        ep_done = done["__all__"]
-        new_episode_return = state.episode_returns + self._batchify_floats(rewardlog)
+        rewardlog = reward * self._env.num_agents  # As per on-policy codebase
+        ep_done = done[0]
+        new_episode_return = state.episode_returns + rewardlog
         new_episode_length = state.episode_lengths + 1
         state = LogEnvState(
             env_state=env_state,
@@ -268,9 +263,9 @@ class SMAXLogWrapper(JaxMARLWrapper):
         obs, env_state, reward, done, info = self._env.step(
             key, state.env_state, action
         )
-        ep_done = done["__all__"]
-        batch_reward = self._batchify_floats(reward)
-        new_episode_return = state.episode_returns + self._batchify_floats(reward)
+        ep_done = done[0]
+        batch_reward = reward
+        new_episode_return = state.episode_returns + reward
         new_episode_length = state.episode_lengths + 1
         new_won_episode = (batch_reward >= 1.0).astype(jnp.float32)
         state = SMAXLogEnvState(
@@ -311,13 +306,8 @@ class CTRolloutManager(JaxMARLWrapper):
     """
     Rollout Manager for Centralized Training of with Parameters Sharing. Used by JaxMARL Q-Learning Baselines.
     - Batchify multiple environments (the number of parallel envs is defined by batch_size in __init__).
-    - Adds a global state (obs["__all__"]) and a global reward (rewards["__all__"]) in the env.step returns.
     - Pads the observations of the agents in order to have all the same length.
     - Adds an agent id (one hot encoded) to the observation vectors.
-
-    By default:
-    - global_state is the concatenation of all agents' observations.
-    - global_reward is the sum of all agents' rewards.
     """
 
     def __init__(
@@ -365,9 +355,7 @@ class CTRolloutManager(JaxMARLWrapper):
             self.obs_size += len(self.agents)
 
         # agents ids
-        self.agents_one_hot = {
-            a: oh for a, oh in zip(self.agents, jnp.eye(len(self.agents)))
-        }
+        self.agents_one_hot_array = jnp.eye(len(self.agents))
         # valid actions
         self.valid_actions = {a: jnp.arange(u.n) for a, u in self.action_spaces.items()}
         self.valid_actions_oh = {
@@ -375,77 +363,50 @@ class CTRolloutManager(JaxMARLWrapper):
             for a, u in self.action_spaces.items()
         }
 
-        # custom global state and rewards for specific envs
+        # custom valid actions for specific envs
         if "smax" in env.name.lower():
-            self.global_state = lambda obs, state: obs["world_state"]
-            self.global_reward = lambda rewards: rewards[self.training_agents[0]]
             self.get_valid_actions = lambda state: jax.vmap(env.get_avail_actions)(
                 state
             )
-        elif "overcooked" in env.name.lower():
-            self.global_state = lambda obs, state: jnp.concatenate(
-                [obs[agent].flatten() for agent in self.agents], axis=-1
-            )
-            self.global_reward = lambda rewards: rewards[self.training_agents[0]]
         elif "hanabi" in env.name.lower():
-            self.global_reward = lambda rewards: rewards[self.training_agents[0]]
             self.get_valid_actions = lambda state: jax.vmap(env.get_legal_moves)(state)
-        elif "road_env" in env.name.lower():
-            self.global_reward = lambda rewards: rewards["agent_0"]
-            self.global_state = lambda obs, state: self._env.get_global_state(obs, state.env_state)
 
     @partial(jax.jit, static_argnums=0)
     def batch_reset(self, key):
         keys = jax.random.split(key, self.batch_size)
-        return jax.vmap(self.wrapped_reset, in_axes=0)(keys)
+        obs, state = jax.vmap(self.wrapped_reset, in_axes=0)(keys)
+        obs = jnp.swapaxes(obs, 0, 1)
+        return obs, state
 
     @partial(jax.jit, static_argnums=0)
     def batch_step(self, key, states, actions):
         keys = jax.random.split(key, self.batch_size)
-        return jax.vmap(self.wrapped_step, in_axes=(0, 0, 0))(keys, states, actions)
+        obs, state, reward, done, info = jax.vmap(
+            self.wrapped_step, in_axes=(0, 0, 1)
+        )(keys, states, actions)
+        obs = jnp.swapaxes(obs, 0, 1)
+        reward = jnp.swapaxes(reward, 0, 1)
+        done = jnp.swapaxes(done, 0, 1)
+        return obs, state, reward, done, info
 
     @partial(jax.jit, static_argnums=0)
     def wrapped_reset(self, key):
-        obs_, state = self._env.reset(key)
+        obs, state = self._env.reset(key)
         if self.preprocess_obs:
-            obs = jax.tree.map(
-                self._preprocess_obs,
-                {agent: obs_[agent] for agent in self.agents},
-                self.agents_one_hot,
+            obs = jax.vmap(self._preprocess_obs, in_axes=(0, 0))(
+                obs, self.agents_one_hot_array
             )
-        else:
-            obs = obs_
-        obs["__all__"] = self.global_state(obs_, state)
         return obs, state
 
     @partial(jax.jit, static_argnums=0)
     def wrapped_step(self, key, state, actions):
-        obs_, state, reward, done, infos = self._env.step(key, state, actions)
+        obs, state, reward, done, info = self._env.step(key, state, actions)
         if self.preprocess_obs:
-            obs = jax.tree.map(
-                self._preprocess_obs,
-                {agent: obs_[agent] for agent in self.agents},
-                self.agents_one_hot,
+            obs = jax.vmap(self._preprocess_obs, in_axes=(0, 0))(
+                obs, self.agents_one_hot_array
             )
-            obs = jax.tree.map(
-                lambda d, o: jnp.where(d, 0.0, o),
-                {agent: done[agent] for agent in self.agents},
-                obs,
-            )  # ensure that the obs are 0s for done agents
-        else:
-            obs = obs_
-        obs["__all__"] = self.global_state(obs_, state)
-        if not "__all__" in reward:
-            reward["__all__"] = self.global_reward(reward)
-        return obs, state, reward, done, infos
-
-    @partial(jax.jit, static_argnums=0)
-    def global_state(self, obs, state):
-        return jnp.concatenate([obs[agent] for agent in self.agents], axis=-1)
-
-    @partial(jax.jit, static_argnums=0)
-    def global_reward(self, reward):
-        return jnp.stack([reward[agent] for agent in self.training_agents]).sum(axis=0)
+            obs = jnp.where(done[:, None], 0.0, obs)
+        return obs, state, reward, done, info
 
     def batch_sample(self, key, agent):
         return self.batch_samplers[agent](
@@ -455,10 +416,8 @@ class CTRolloutManager(JaxMARLWrapper):
     @partial(jax.jit, static_argnums=0)
     def get_valid_actions(self, state):
         # default is to return the same valid actions one hot encoded for each env
-        return {
-            agent: jnp.tile(actions, self.batch_size).reshape(self.batch_size, -1)
-            for agent, actions in self.valid_actions_oh.items()
-        }
+        actions = jnp.stack([self.valid_actions_oh[a] for a in self.agents], axis=0)
+        return jnp.tile(actions[:, None, :], (1, self.batch_size, 1))
 
     @partial(jax.jit, static_argnums=0)
     def _preprocess_obs(self, arr, extra_features):

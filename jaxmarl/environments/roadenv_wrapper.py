@@ -2,6 +2,11 @@
 JaxMARL Road Environment Wrapper
    This file was adapted from the original in the process of creating the imp-act adaption of JaxMARL under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
    Original file: jaxmarl/environments/multi_agent_env.py
+
+Note:
+----
+For step() and reset(), this wrapper returns only per-agent arrays;
+To get global state, call get_global_state(...).
 """
 
 import jax
@@ -155,15 +160,10 @@ class RoadEnvironment_Wrapper(object):
         return extra_observation_size
 
     @partial(jax.jit, static_argnums=(0,))
-    def reset(self, key: chex.PRNGKey) -> Tuple[Dict[str, chex.Array], State]:
+    def reset(self, key: chex.PRNGKey) -> Tuple[chex.Array, State]:
         """Performs resetting of the environment."""
-
         _, state = self.env.reset(key)
         obs = self.get_obs(state).astype(jnp.float32)
-        global_state = self.get_global_state(obs, state).astype(jnp.float32)
-        obs = {agent: obs[i] for i, agent in enumerate(self.agents)}
-        obs.update({"__all__": global_state})
-
         return obs, state
 
     @partial(jax.jit, static_argnums=(0,))
@@ -171,9 +171,9 @@ class RoadEnvironment_Wrapper(object):
         self,
         key: chex.PRNGKey,
         state: State,
-        actions: Dict[str, chex.Array],
+        actions: chex.Array,
         reset_state: Optional[State] = None,
-    ) -> Tuple[Dict[str, chex.Array], State, Dict[str, float], Dict[str, bool], Dict]:
+    ) -> Tuple[chex.Array, State, chex.Array, chex.Array, Dict]:
         """Performs step transitions in the environment. Resets the environment if done.
         To control the reset state, pass `reset_state`. Otherwise, the environment will reset randomly.
         """
@@ -188,41 +188,25 @@ class RoadEnvironment_Wrapper(object):
             obs_re = self.get_obs(states_re)
 
         # Auto-reset environment based on termination
-        states = jax.lax.cond(dones["__all__"], lambda: states_re, lambda: states_st)
-
-        obs = jax.lax.cond(dones["__all__"], lambda: obs_re, lambda: obs_st)
+        done_all = dones[0] # define done_all
+        states = jax.lax.cond(done_all, lambda: states_re, lambda: states_st)
+        obs = jax.lax.cond(done_all, lambda: obs_re, lambda: obs_st)
 
         if self.record_rollout:
-            # if record_rollout is True, do no reset the environment
+            # if record_rollout is True, do not reset the environment
             # return the last state and observation
             return obs_st, states_st, rewards, dones, infos
-        else:
-            return obs, states, rewards, dones, {}
+        return obs, states, rewards, dones, {}
 
     def step_env(
-        self, key: chex.PRNGKey, state: State, actions: Dict[str, chex.Array]
-    ) -> Tuple[Dict[str, chex.Array], State, Dict[str, float], Dict[str, bool], Dict]:
+        self, key: chex.PRNGKey, state: State, actions: chex.Array
+    ) -> Tuple[chex.Array, State, chex.Array, chex.Array, Dict]:
         """Environment-specific step transition."""
-
-        # convert actions dict to array
-        array_actions = jnp.stack(
-            [actions[agent] for agent in self.agents], dtype=jnp.int32
-        )
-
-        _, next_state, reward, done, info = self.env.step_env(key, state, array_actions)
+        _, next_state, reward, done, info = self.env.step_env(key, state, actions)
         next_obs = self.get_obs(next_state).astype(jnp.float32)
-        global_state = self.get_global_state(next_obs, next_state).astype(jnp.float32)
         reward = reward.astype(jnp.float32)
-
-        # make next_obs, reward, done dicts
-        # modify the done signal to include the "__all__" key
-        next_obs = {agent: next_obs[a] for a, agent in enumerate(self.agents)}
-        rewards = {agent: reward for a, agent in enumerate(self.agents)}
-        rewards["__all__"] = reward
-        dones = {agent: done for a, agent in enumerate(self.agents)}
-        next_obs.update({"__all__": global_state})
-        dones.update({"__all__": done})
-
+        rewards = jnp.full((self.num_agents,), reward, dtype=jnp.float32)
+        dones = jnp.full((self.num_agents,), done, dtype=bool)
         return next_obs, next_state, rewards, dones, info
 
     def get_obs(self, state: State) -> chex.Array:
@@ -251,7 +235,7 @@ class RoadEnvironment_Wrapper(object):
         )
         return jnp.concatenate(obs, axis=1)
 
-    def get_global_state(self, obs, state: State) -> Dict[str, chex.Array]:
+    def get_global_state(self, obs, state: State) -> chex.Array:
         _timestep = jnp.array(
             [state.timestep / self.env.max_timesteps], dtype=jnp.float32
         )
@@ -288,10 +272,10 @@ class RoadEnvironment_Wrapper(object):
         return self.action_spaces[self.agents[0]]
 
     @partial(jax.jit, static_argnums=(0,))
-    def get_avail_actions(self, state: State = None) -> Dict[str, chex.Array]:
+    def get_avail_actions(self, state: State = None) -> chex.Array:
         """Returns the available actions for each agent."""
         num_component_actions = len(self.env.action_map)
-        return {agent: list(range(num_component_actions)) for agent in self.agents}
+        return jnp.ones((self.num_agents, num_component_actions), dtype=jnp.float32)
 
     @property
     def name(self) -> str:
