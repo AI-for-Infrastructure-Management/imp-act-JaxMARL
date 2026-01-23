@@ -9,13 +9,11 @@ import jax.numpy as jnp
 import numpy as np
 import logging
 from functools import partial
-from typing import Any
 import yaml
 
 import chex
 import flax.linen as nn
 from flax.linen.initializers import constant, orthogonal
-from gymnax.wrappers.purerl import LogWrapper
 import hydra
 from omegaconf import OmegaConf
 
@@ -173,12 +171,6 @@ def make_get_greedy_metrics(train_config, test_num_envs, test_num_steps):
         hidden_dim=train_config["HIDDEN_SIZE"],
     )
 
-    def batchify(x: dict):
-        return jnp.stack([x[agent] for agent in env.agents], axis=0)
-
-    def unbatchify(x: jnp.ndarray):
-        return {agent: x[i] for i, agent in enumerate(env.agents)}
-
     def get_greedy_actions(q_vals, valid_actions):
         unavail_actions = 1 - valid_actions
         q_vals = q_vals - (unavail_actions * 1e10)
@@ -190,8 +182,8 @@ def make_get_greedy_metrics(train_config, test_num_envs, test_num_steps):
         def _greedy_env_step(step_state, unused):
             params, env_state, last_obs, last_dones, hstate, rng = step_state
             rng, key_s = jax.random.split(rng)
-            _obs = batchify(last_obs)[:, np.newaxis]
-            _dones = batchify(last_dones)[:, np.newaxis]
+            _obs = last_obs[:, np.newaxis]
+            _dones = last_dones[:, np.newaxis]
             hstate, q_vals = jax.vmap(network.apply, in_axes=(None, 0, 0, 0))(
                 params,
                 hstate,
@@ -200,11 +192,10 @@ def make_get_greedy_metrics(train_config, test_num_envs, test_num_steps):
             )
             q_vals = q_vals.squeeze(axis=1)
             valid_actions = env.get_valid_actions(env_state.env_state)
-            actions = get_greedy_actions(q_vals, batchify(valid_actions))
+            actions = get_greedy_actions(q_vals, valid_actions)
 
             # actions = jax.tree.map(lambda x: jnp.full_like(x, 2), actions)
             # actions = jax.tree.map(lambda x: jnp.zeros_like(x), actions)
-            actions = unbatchify(actions)
             obs, env_state, rewards, dones, infos = env.batch_step(
                 key_s, env_state, actions
             )
@@ -213,10 +204,7 @@ def make_get_greedy_metrics(train_config, test_num_envs, test_num_steps):
 
         rng, _rng = jax.random.split(rng)
         init_obs, env_state = env.batch_reset(_rng)
-        init_dones = {
-            agent: jnp.zeros((test_num_envs), dtype=bool)
-            for agent in env.agents + ["__all__"]
-        }
+        init_dones = jnp.zeros((len(env.agents), test_num_envs), dtype=bool)
         rng, _rng = jax.random.split(rng)
         hstate = ScannedRNN.initialize_carry(
             train_config["HIDDEN_SIZE"], len(env.agents), test_num_envs
@@ -248,12 +236,6 @@ def make_get_rollout_data(train_config, test_num_envs):
         hidden_dim=train_config["HIDDEN_SIZE"],
     )
 
-    def batchify(x: dict):
-        return jnp.stack([x[agent] for agent in env.agents], axis=0)
-
-    def unbatchify(x: jnp.ndarray):
-        return {agent: x[i] for i, agent in enumerate(env.agents)}
-
     def get_greedy_actions(q_vals, valid_actions):
         unavail_actions = 1 - valid_actions
         q_vals = q_vals - (unavail_actions * 1e10)
@@ -265,8 +247,8 @@ def make_get_rollout_data(train_config, test_num_envs):
         def _greedy_env_step(step_state, unused):
             params, env_state, last_obs, last_dones, hstate, rng = step_state
             rng, key_s = jax.random.split(rng)
-            _obs = batchify(last_obs)[:, np.newaxis]
-            _dones = batchify(last_dones)[:, np.newaxis]
+            _obs = last_obs[:, np.newaxis]
+            _dones = last_dones[:, np.newaxis]
             hstate, q_vals = jax.vmap(network.apply, in_axes=(None, 0, 0, 0))(
                 params,
                 hstate,
@@ -275,11 +257,10 @@ def make_get_rollout_data(train_config, test_num_envs):
             )
             q_vals = q_vals.squeeze(axis=1)
             valid_actions = env.get_valid_actions(env_state.env_state)
-            actions = get_greedy_actions(q_vals, batchify(valid_actions))
+            actions = get_greedy_actions(q_vals, valid_actions)
 
             # actions = jax.tree.map(lambda x: jnp.full_like(x, 2), actions)
             # actions = jax.tree.map(lambda x: jnp.zeros_like(x), actions)
-            actions = unbatchify(actions)
             obs, env_state, rewards, dones, infos = env.batch_step(
                 key_s, env_state, actions
             )
@@ -288,10 +269,7 @@ def make_get_rollout_data(train_config, test_num_envs):
 
         rng, _rng = jax.random.split(rng)
         init_obs, env_state = env.batch_reset(_rng)
-        init_dones = {
-            agent: jnp.zeros((test_num_envs), dtype=bool)
-            for agent in env.agents + ["__all__"]
-        }
+        init_dones = jnp.zeros((len(env.agents), test_num_envs), dtype=bool)
         rng, _rng = jax.random.split(rng)
         hstate = ScannedRNN.initialize_carry(
             train_config["HIDDEN_SIZE"], len(env.agents), test_num_envs
