@@ -17,7 +17,7 @@ outputs/
 models/
 *.csv*
 !results.ipynb
-!Figure_6.ipynb
+!Figure_8.ipynb
 
 slurm_scripts/
 *.out
