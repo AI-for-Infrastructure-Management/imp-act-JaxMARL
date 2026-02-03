@@ -20,7 +20,7 @@ ENV PATH="/root/.local/bin:/root/.cargo/bin:$PATH"
 # Clone repositories
 RUN git clone https://github.com/AI-for-Infrastructure-Management/imp-act-JaxMARL.git && \
     cd imp-act-JaxMARL && \
-    git checkout submission && \
+    git checkout main && \
     git clone https://github.com/AI-for-Infrastructure-Management/imp-act.git && \
     cd imp-act && \
     git checkout main
