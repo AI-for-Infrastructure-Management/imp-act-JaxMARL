@@ -133,6 +133,20 @@ def make_train(config, env):
     config["NUM_UPDATES"] = (
         config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     )
+    config["NUM_EVALS"] = int(1 / config["TEST_INTERVAL"])
+    config["EVAL_UPDATES"] = jnp.asarray(
+        np.linspace(1, config["NUM_UPDATES"], config["NUM_EVALS"], dtype=int)
+    )
+    if config.get("SAVE_CHECKPOINTS", False):
+        config["NUM_CHECKPOINTS"] = int(1 / config["SAVE_CHECKPOINTS_INTERVAL"])
+        config["CHECKPOINT_UPDATES"] = jnp.asarray(
+            np.linspace(
+                1,
+                config["NUM_UPDATES"],
+                config["NUM_CHECKPOINTS"],
+                dtype=int,
+            )
+        )
 
     eps_scheduler = optax.linear_schedule(
         config["EPS_START"],
@@ -496,9 +510,7 @@ def make_train(config, env):
             if config.get("TEST_DURING_TRAINING", True):
                 rng, _rng = jax.random.split(rng)
                 test_state = jax.lax.cond(
-                    train_state.n_updates
-                    % int(config["NUM_UPDATES"] * config["TEST_INTERVAL"])
-                    == 0,
+                    jnp.any(train_state.n_updates == config["EVAL_UPDATES"]),
                     lambda _: get_greedy_metrics(_rng, train_state),
                     lambda _: test_state,
                     operand=None,
@@ -528,9 +540,7 @@ def make_train(config, env):
             # CHECKPOINTING
             if config.get("SAVE_CHECKPOINTS", False):
                 jax.lax.cond(
-                    train_state.n_updates
-                    % int(config["NUM_UPDATES"] * config["SAVE_CHECKPOINTS_INTERVAL"])
-                    == 0,
+                    jnp.any(train_state.n_updates == config["CHECKPOINT_UPDATES"]),
                     lambda _: jax.debug.callback(
                         checkpoint_model,
                         original_seed,
@@ -742,10 +752,6 @@ def single_run(config):
         config[k] = v
 
     env, env_name = env_from_config(copy.deepcopy(config))
-
-    config["TOTAL_TIMESTEPS"] = (
-        config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
-    )
 
     if config["SEED"] == "random":
         config["SEED"] = np.random.randint(0, 2**32 - 1)

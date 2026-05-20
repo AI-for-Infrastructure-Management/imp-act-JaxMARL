@@ -1,6 +1,6 @@
 """
-This file was adapted from the original in the process of creating the 
-imp-act adaption of JaxMARL under the 
+This file was adapted from the original in the process of creating the
+imp-act adaption of JaxMARL under the
 [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
 
 Original file: baselines/MAPPO/mappo_rnn_mpe.py
@@ -255,9 +255,23 @@ def make_train(config):
     env = LogWrapper(env)
 
     config["NUM_ACTORS"] = env.num_agents * config["NUM_ENVS"]
-    config["TOTAL_TIMESTEPS"] = (
-        config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
+    config["NUM_UPDATES"] = (
+        config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     )
+    config["NUM_EVALS"] = int(1 / config["TEST_INTERVAL"])
+    config["EVAL_UPDATES"] = jnp.asarray(
+        np.linspace(0, config["NUM_UPDATES"] - 1, config["NUM_EVALS"], dtype=int)
+    )
+    if config.get("SAVE_CHECKPOINTS", False):
+        config["NUM_CHECKPOINTS"] = int(1 / config["SAVE_CHECKPOINTS_INTERVAL"])
+        config["CHECKPOINT_UPDATES"] = jnp.asarray(
+            np.linspace(
+                0,
+                config["NUM_UPDATES"] - 1,
+                config["NUM_CHECKPOINTS"],
+                dtype=int,
+            )
+        )
     config["MINIBATCH_SIZE"] = (
         config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     )
@@ -686,9 +700,7 @@ def make_train(config):
 
                 def eval_and_store_returns(rng, train_states):
                     eval_metrics = get_greedy_metrics(rng, train_states)
-                    idx = update_steps // int(
-                        config["NUM_UPDATES"] * config["TEST_INTERVAL"]
-                    )
+                    idx = jnp.argmax(update_steps == config["EVAL_UPDATES"])
                     _metrics_manager = EvalMetricsManager(
                         logged_eval_metrics=eval_metrics,
                         eval_returns=metrics_manager.eval_returns.at[idx].set(
@@ -698,8 +710,7 @@ def make_train(config):
                     return _metrics_manager
 
                 metrics_manager = jax.lax.cond(
-                    update_steps % int(config["NUM_UPDATES"] * config["TEST_INTERVAL"])
-                    == 0,
+                    jnp.any(update_steps == config["EVAL_UPDATES"]),
                     lambda _: eval_and_store_returns(_rng, train_states),
                     lambda _: metrics_manager,
                     operand=None,
@@ -713,11 +724,8 @@ def make_train(config):
 
             # CHECKPOINTING
             if config.get("SAVE_CHECKPOINTS", False):
-
                 jax.lax.cond(
-                    update_steps
-                    % int(config["NUM_UPDATES"] * config["SAVE_CHECKPOINTS_INTERVAL"])
-                    == 0,
+                    jnp.any(update_steps == config["CHECKPOINT_UPDATES"]),
                     lambda _: jax.debug.callback(
                         checkpoint_model,
                         original_seed,
@@ -874,10 +882,9 @@ def make_train(config):
         rng, _rng = jax.random.split(rng)
 
         # Metrics Manager
-        num_evals = int(1 / config["TEST_INTERVAL"])
         metrics_manager = EvalMetricsManager(
             logged_eval_metrics=get_greedy_metrics(_rng, train_states),
-            eval_returns=jnp.zeros((num_evals,), device="cpu"),
+            eval_returns=jnp.zeros((config["NUM_EVALS"],), device="cpu"),
         )
 
         # train
@@ -929,9 +936,6 @@ def single_run(config):
 
     # embedding size for the GRU, must be same as the GRU hidden size
     config["FC_DIM_SIZE"] = config["GRU_HIDDEN_DIM"]
-    config["TOTAL_TIMESTEPS"] = (
-        config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
-    )
 
     if config["SEED"] == "random":
         config["SEED"] = np.random.randint(0, 2**32 - 1)
