@@ -798,8 +798,6 @@ def tune(default_config):
         for k, v in dict(wandb.config).items():
             config[k] = v
 
-        config["TOTAL_TIMESTEPS"] = config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
-
         if config["SEED"] == "random":
             seed = np.random.randint(0, 2**32 - 1)
             config["SAMPLED_SEED"] = seed

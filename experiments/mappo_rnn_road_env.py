@@ -979,9 +979,6 @@ def tune(default_config):
 
         # embedding size for the GRU, must be same as the GRU hidden size
         config["FC_HIDDEN_DIM"] = config["GRU_HIDDEN_DIM"]
-        config["TOTAL_TIMESTEPS"] = (
-            config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
-        )
 
         if config["SEED"] == "random":
             seed = np.random.randint(0, 2**32 - 1)
