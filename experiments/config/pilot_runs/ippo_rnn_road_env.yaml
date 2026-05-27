@@ -53,7 +53,7 @@
 
 # model checkpointing (will be saved in hydra dir)
 "SAVE_CHECKPOINTS": True # save checkpoints
-"SAVE_CHECKPOINTS_INTERVAL": 0.01 # as a fraction of updates. Tipp: set to same value or fraction of TEST_INTERVAL.
+"SAVE_CHECKPOINTS_INTERVAL": 0.01 # as a fraction of updates. Tip: set to same value or fraction of TEST_INTERVAL.
 
 # precision
 "DOUBLE_PRECISION_MODE": False # use double precision for the environment

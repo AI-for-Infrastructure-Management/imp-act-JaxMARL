@@ -38,7 +38,7 @@
 # evaluate
 "TEST_DURING_TRAINING": True
 "TEST_INTERVAL": 0.01 # as a fraction of updates
-"TEST_NUM_STEPS": 51
+"TEST_NUM_STEPS": 50
 "TEST_NUM_ENVS": 1000
 
 "ALG_NAME": "qmix_rnn"
@@ -59,7 +59,7 @@
 
 # checkpointing
 "SAVE_CHECKPOINTS": True # save checkpoints
-"SAVE_CHECKPOINTS_INTERVAL": 0.01 # as a fraction of updates. Tipp: set to same value or fraction of TEST_INTERVAL.
+"SAVE_CHECKPOINTS_INTERVAL": 0.01 # as a fraction of updates. Tip: set to same value or fraction of TEST_INTERVAL.
 
 # precision
 "DOUBLE_PRECISION_MODE": False # use double precision for the environment
