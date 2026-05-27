@@ -24,7 +24,7 @@
 "ENV_NAME": "road_env"
 "ENV_KWARGS":
   "map_name": "ToyExample-v2"
-  "encoding_type": "binary"     # can be binary, one-hot, sinusoidal or none
+  "encoding_type": "none"     # can be binary, one-hot, sinusoidal or none
   "include_extra_observations":
     "segment_lengths": True     # Length of the segments
     "volumes": True             # Volumes of the vehicles on the segment normalized by the segment capacity
