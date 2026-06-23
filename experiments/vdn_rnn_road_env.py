@@ -10,6 +10,7 @@ import copy
 import jax
 import jax.numpy as jnp
 import numpy as np
+import logging
 from functools import partial
 from typing import NamedTuple, Dict, Union, Any
 
@@ -33,6 +34,9 @@ from jaxmarl.wrappers.baselines import (
     CTRolloutManager,
     save_params,
 )
+
+# Get Hydra's logger
+log = logging.getLogger(__name__)
 
 class ScannedRNN(nn.Module):
 
@@ -687,7 +691,7 @@ def make_train(config, env):
                 "metadata": metadata,
             }
 
-            print(f"Saving checkpoint {save_path}")
+            log.info(f"Saving checkpoint {save_path}")
             save_params(params_to_save, save_path)
 
         rng, _rng = jax.random.split(rng)
@@ -782,8 +786,6 @@ def tune(default_config):
         for k, v in dict(wandb.config).items():
             config[k] = v
 
-        config["TOTAL_TIMESTEPS"] = config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
-
         if config["SEED"] == "random":
             seed = np.random.randint(0, 2**32 - 1)
             config["SAMPLED_SEED"] = seed
@@ -859,6 +861,7 @@ def main(config):
 
     if config.get("DOUBLE_PRECISION_MODE", False):
         jax.config.update("jax_enable_x64", True)
+        log.info("64 bit precision enabled")
 
     if config["HYP_TUNE"]:
         tune(config)
