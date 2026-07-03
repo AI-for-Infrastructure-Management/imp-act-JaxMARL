@@ -5,6 +5,7 @@ command:
   - --config-path=./config/hyper_parameter_tuning/cologne_v1
 entity: imp-act
 method: random
+SWEEP_SEEDS: [101, 102, 103]
 metric:
   goal: maximize
   name: test_returned_episode_returns
