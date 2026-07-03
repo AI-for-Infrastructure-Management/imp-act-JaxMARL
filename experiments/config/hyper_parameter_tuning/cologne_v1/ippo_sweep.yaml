@@ -11,8 +11,6 @@ metric:
 name: ippo_rnn_hyperparameter_tuning
 parameters:
   # --- General Hyperparameters ---
-  NUM_UPDATES:
-    value: 1500
   NUM_ENVS:
     values: [32, 64, 128]
   LR:
@@ -47,21 +45,5 @@ parameters:
   SCALE_CLIP_EPS:
     value: False
   
-  # --- Environment Configuration ---
-  ENV_KWARGS:
-    values:
-      - encoding_type: binary
-        include_extra_observations:
-          segment_lengths: true
-          volumes: true
-          capacity: false
-        map_name: Cologne-v1
-      - encoding_type: none
-        include_extra_observations:
-          segment_lengths: true
-          volumes: true
-          capacity: false
-        map_name: Cologne-v1
-
 program: experiments/ippo_rnn_road_env.py
 project: jaxMARL-Cologne-v1

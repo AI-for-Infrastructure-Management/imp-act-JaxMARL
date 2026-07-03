@@ -11,8 +11,6 @@ metric:
 name: pqn_rnn_hyperparameter_tuning
 parameters:
   # --- General Hyperparameters ---
-  NUM_UPDATES:
-    value: 1500
   NUM_ENVS:
     values: [64, 128]
   NUM_STEPS:
@@ -53,22 +51,6 @@ parameters:
   # --- Environment/Reward ---
   REW_SCALE:
     value: 1.0e-9 # 1.00E-09
-
-  # --- Environment Configuration ---
-  ENV_KWARGS:
-    values:
-      - encoding_type: binary
-        include_extra_observations:
-          segment_lengths: true
-          volumes: true
-          capacity: false
-        map_name: Cologne-v1
-      - encoding_type: none
-        include_extra_observations:
-          segment_lengths: true
-          volumes: true
-          capacity: false
-        map_name: Cologne-v1
 
 program: experiments/pqn_vdn_rnn_road_env.py
 project: jaxMARL-Cologne-v1
