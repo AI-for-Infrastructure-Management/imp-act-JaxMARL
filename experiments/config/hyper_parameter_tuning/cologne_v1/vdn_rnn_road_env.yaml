@@ -2,7 +2,7 @@
 # Hyperparameters from JaxMARL paper (Rutherford et al., NeurIPS 2024 D&B Track), 
 # Supplemental Table 8 ("Table 8: Q-Learning hyperparameters for MPE, SMAX and Overcooked")
 
-"TOTAL_TIMESTEPS": 50_000_000
+"TOTAL_TIMESTEPS": 30_000_000
 "NUM_ENVS": 16
 "NUM_STEPS": 128
 "BUFFER_SIZE": 5000
