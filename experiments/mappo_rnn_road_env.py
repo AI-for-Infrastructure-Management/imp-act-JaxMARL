@@ -281,6 +281,12 @@ def make_train(config):
         else config["CLIP_EPS"]
     )
 
+    early_stopping_enabled = config.get("EARLY_STOPPING_PATIENCE", 0) > 0
+    if early_stopping_enabled and not config.get("TEST_DURING_TRAINING", True):
+        raise ValueError("EARLY_STOPPING_PATIENCE requires TEST_DURING_TRAINING=True")
+    if early_stopping_enabled and config.get("NUM_SEEDS", 1) > 1:
+        raise ValueError("EARLY_STOPPING_PATIENCE requires NUM_SEEDS=1")
+
     def linear_schedule(count):
         frac = (
             1.0
@@ -370,7 +376,7 @@ def make_train(config):
         # TRAIN LOOP
         def _update_step(update_runner_state, unused):
             # COLLECT TRAJECTORIES
-            runner_state, update_steps, metrics_manager = update_runner_state
+            runner_state, update_steps, metrics_manager, early_stop_state = update_runner_state
 
             def _env_step(runner_state, unused):
                 (
@@ -697,6 +703,7 @@ def make_train(config):
             # EVALUATION
             if config.get("TEST_DURING_TRAINING", True):
                 rng, _rng = jax.random.split(rng)
+                is_eval_step = jnp.any(update_steps == config["EVAL_UPDATES"])
 
                 def eval_and_store_returns(rng, train_states):
                     eval_metrics = get_greedy_metrics(rng, train_states)
@@ -710,7 +717,7 @@ def make_train(config):
                     return _metrics_manager
 
                 metrics_manager = jax.lax.cond(
-                    jnp.any(update_steps == config["EVAL_UPDATES"]),
+                    is_eval_step,
                     lambda _: eval_and_store_returns(_rng, train_states),
                     lambda _: metrics_manager,
                     operand=None,
@@ -721,6 +728,55 @@ def make_train(config):
                         for k, v in metrics_manager.logged_eval_metrics.items()
                     }
                 )
+
+                if early_stopping_enabled:
+                    patience_ts = config["EARLY_STOPPING_PATIENCE"]
+                    timesteps = (update_steps + 1) * config["NUM_ENVS"] * config["NUM_STEPS"]
+                    current_reward = metrics_manager.logged_eval_metrics["returned_episode_returns"]
+                    improved = ~jnp.isnan(current_reward) & (
+                        current_reward > early_stop_state["best_reward"]
+                    )
+                    new_best_reward = jnp.where(
+                        is_eval_step & improved, current_reward, early_stop_state["best_reward"]
+                    )
+                    new_timesteps_at_best = jnp.where(
+                        is_eval_step & improved,
+                        timesteps,
+                        early_stop_state["timesteps_at_best"],
+                    )
+                    new_should_stop = jnp.where(
+                        is_eval_step,
+                        (timesteps - new_timesteps_at_best) > patience_ts,
+                        early_stop_state["should_stop"],
+                    )
+                    newly_stopped = new_should_stop & ~early_stop_state["should_stop"]
+
+                    def _log_early_stop(update_steps, timesteps, best_reward):
+                        log.info(
+                            f"Early stopping at update {int(update_steps)}, "
+                            f"timestep {int(timesteps)}. "
+                            f"Best reward: {float(best_reward):.4f}"
+                        )
+
+                    jax.lax.cond(
+                        newly_stopped,
+                        lambda _: jax.debug.callback(
+                            _log_early_stop, update_steps, timesteps, new_best_reward
+                        ),
+                        lambda _: None,
+                        operand=None,
+                    )
+                    early_stop_state = {
+                        "best_reward": new_best_reward,
+                        "timesteps_at_best": new_timesteps_at_best,
+                        "should_stop": new_should_stop,
+                    }
+                    metrics.update({
+                        "early_stop/best_reward": new_best_reward,
+                        "early_stop/timesteps_without_improvement": (
+                            timesteps - new_timesteps_at_best
+                        ).astype(jnp.float32),
+                    })
 
             # CHECKPOINTING
             if config.get("SAVE_CHECKPOINTS", False):
@@ -769,7 +825,7 @@ def make_train(config):
                 rnorm,
                 rng,
             )
-            return (runner_state, update_steps, metrics_manager), metrics
+            return (runner_state, update_steps, metrics_manager, early_stop_state), metrics
 
         def get_greedy_metrics(rng, train_states):
             """Help function to test greedy policy during training"""
@@ -898,12 +954,33 @@ def make_train(config):
             init_running_stats(),
             _rng,
         )
-        runner_state, metrics = jax.lax.scan(
-            _update_step,
-            (runner_state, 0, metrics_manager),
-            None,
-            config["NUM_UPDATES"],
-        )
+        early_stop_state = {
+            "best_reward": jnp.array(-jnp.inf, dtype=jnp.float32),
+            "timesteps_at_best": jnp.array(0, dtype=jnp.int32),
+            "should_stop": jnp.array(False, dtype=bool),
+        }
+        update_runner_state = (runner_state, 0, metrics_manager, early_stop_state)
+
+        if early_stopping_enabled:
+            def _cond_fn(update_runner_state):
+                update_steps = update_runner_state[1]
+                early_stop_state = update_runner_state[3]
+                return (update_steps < config["NUM_UPDATES"]) & (
+                    ~early_stop_state["should_stop"]
+                )
+
+            def _body_fn(update_runner_state):
+                update_runner_state, _ = _update_step(update_runner_state, None)
+                return update_runner_state
+
+            runner_state = jax.lax.while_loop(_cond_fn, _body_fn, update_runner_state)
+        else:
+            runner_state, _ = jax.lax.scan(
+                _update_step,
+                update_runner_state,
+                None,
+                config["NUM_UPDATES"],
+            )
         return {"runner_state": runner_state, "metrics": None}
 
     return train
@@ -954,11 +1031,14 @@ def single_run(config):
 
     rng = jax.random.PRNGKey(config["SEED"])
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
-    train_vjit = jax.jit(jax.vmap(make_train(config)))
-    outs = jax.block_until_ready(train_vjit(rngs))
+    train_fn = make_train(config)
+    if config["NUM_SEEDS"] == 1:
+        outs = jax.block_until_ready(jax.jit(train_fn)(rngs[0]))
+    else:
+        outs = jax.block_until_ready(jax.jit(jax.vmap(train_fn))(rngs))
 
     # wandb summary
-    metrics_manager = outs["runner_state"][-1]
+    metrics_manager = outs["runner_state"][2]
     wandb.run.summary["eval_returns"] = list(metrics_manager.eval_returns)
 
 
