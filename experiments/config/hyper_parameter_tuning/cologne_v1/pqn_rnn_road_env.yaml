@@ -1,7 +1,7 @@
 # Convergence pilot for PQN-VDN on the IMP-act road env.
 # Algorithm hyperparameters from the PQN paper SMAX config.
 
-"TOTAL_TIMESTEPS": 30_000_000
+"TOTAL_TIMESTEPS": 50_000_000
 "NUM_ENVS": 128
 "NUM_STEPS": 51
 "MEMORY_WINDOW": 4
