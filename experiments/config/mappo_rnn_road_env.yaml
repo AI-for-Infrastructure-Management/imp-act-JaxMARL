@@ -34,6 +34,7 @@ TEST_DURING_TRAINING: True
 TEST_INTERVAL: 0.01 # as a fraction of updates
 TEST_NUM_STEPS: 50
 TEST_NUM_ENVS: 1_000
+EARLY_STOPPING_PATIENCE: 0 # timesteps without improvement to trigger early stop (0 = disabled; requires NUM_SEEDS=1)
 
 ALG_NAME: mappo_rnn
 

@@ -1,6 +1,6 @@
 """
-This file was adapted from the original in the process of creating the 
-imp-act adaption of JaxMARL under the 
+This file was adapted from the original in the process of creating the
+imp-act adaption of JaxMARL under the
 [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
 
 Original file: baselines/MAPPO/mappo_rnn_mpe.py
@@ -40,7 +40,7 @@ log = logging.getLogger(__name__)
 class RoadEnvWorldStateWrapper(JaxMARLWrapper):
     """
     Provides a `"world_state"` observation for the centralised critic.
-    world state observation of dimension: (num_agents, world_state_size)
+    world state observation of dimension: (world_state_size,)
     """
 
     def __init__(self, env):
@@ -60,7 +60,13 @@ class RoadEnvWorldStateWrapper(JaxMARLWrapper):
 
     @partial(jax.jit, static_argnums=0)
     def world_state_fn(self, obs, state):
-        return obs["__all__"][None].repeat(self._env.num_agents, axis=0)
+        return obs["__all__"]
+
+    @partial(jax.jit, static_argnums=0)
+    def broadcast_env_data(self, x):
+        broadcast_shape = (self._env.num_agents, *x.shape)
+        flat_shape = (-1, *x.shape[1:])
+        return jnp.broadcast_to(x[None, ...], broadcast_shape).reshape(flat_shape)
 
     def world_state_size(self):
         return self._env.world_state_size
@@ -166,16 +172,26 @@ class CriticRNN(nn.Module):
         return hidden, jnp.squeeze(critic, axis=-1)
 
 
-class Transition(NamedTuple):
-    global_done: jnp.ndarray
+# Actor- and env-level rollout data use different batch axes, so they are kept
+# separate to allow minibatch slicing with the appropriate index mapping.
+class ActorBatch(NamedTuple):
     done: jnp.ndarray
     action: jnp.ndarray
     value: jnp.ndarray
     reward: jnp.ndarray
     log_prob: jnp.ndarray
     obs: jnp.ndarray
-    world_state: jnp.ndarray
     info: jnp.ndarray
+
+
+class EnvBatch(NamedTuple):
+    global_done: jnp.ndarray
+    world_state: jnp.ndarray
+
+
+class Transition(NamedTuple):
+    actor: ActorBatch
+    env: EnvBatch
 
 
 def batchify(x: dict, agent_list, num_actors):
@@ -239,9 +255,23 @@ def make_train(config):
     env = LogWrapper(env)
 
     config["NUM_ACTORS"] = env.num_agents * config["NUM_ENVS"]
-    config["TOTAL_TIMESTEPS"] = (
-        config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
+    config["NUM_UPDATES"] = (
+        config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     )
+    config["NUM_EVALS"] = int(1 / config["TEST_INTERVAL"])
+    config["EVAL_UPDATES"] = jnp.asarray(
+        np.linspace(0, config["NUM_UPDATES"] - 1, config["NUM_EVALS"], dtype=int)
+    )
+    if config.get("SAVE_CHECKPOINTS", False):
+        config["NUM_CHECKPOINTS"] = int(1 / config["SAVE_CHECKPOINTS_INTERVAL"])
+        config["CHECKPOINT_UPDATES"] = jnp.asarray(
+            np.linspace(
+                0,
+                config["NUM_UPDATES"] - 1,
+                config["NUM_CHECKPOINTS"],
+                dtype=int,
+            )
+        )
     config["MINIBATCH_SIZE"] = (
         config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     )
@@ -250,6 +280,12 @@ def make_train(config):
         if config["SCALE_CLIP_EPS"]
         else config["CLIP_EPS"]
     )
+
+    early_stopping_enabled = config.get("EARLY_STOPPING_PATIENCE", 0) > 0
+    if early_stopping_enabled and not config.get("TEST_DURING_TRAINING", True):
+        raise ValueError("EARLY_STOPPING_PATIENCE requires TEST_DURING_TRAINING=True")
+    if early_stopping_enabled and config.get("NUM_SEEDS", 1) > 1:
+        raise ValueError("EARLY_STOPPING_PATIENCE requires NUM_SEEDS=1")
 
     def linear_schedule(count):
         frac = (
@@ -340,7 +376,7 @@ def make_train(config):
         # TRAIN LOOP
         def _update_step(update_runner_state, unused):
             # COLLECT TRAJECTORIES
-            runner_state, update_steps, metrics_manager = update_runner_state
+            runner_state, update_steps, metrics_manager, early_stop_state = update_runner_state
 
             def _env_step(runner_state, unused):
                 (
@@ -368,10 +404,7 @@ def make_train(config):
                 env_act = {k: v.squeeze() for k, v in env_act.items()}
 
                 # VALUE
-                # output of wrapper is (num_envs, num_agents, world_state_size)
-                # swap axes to (num_agents, num_envs, world_state_size) before reshaping to (num_actors, world_state_size)
-                world_state = last_obs["world_state"].swapaxes(0, 1)
-                world_state = world_state.reshape((config["NUM_ACTORS"], -1))
+                world_state = env.broadcast_env_data(last_obs["world_state"])
 
                 cr_in = (
                     world_state[None, :],
@@ -396,15 +429,19 @@ def make_train(config):
                 info = jax.tree.map(lambda x: x.reshape((config["NUM_ACTORS"])), info)
                 done_batch = batchify(done, env.agents, config["NUM_ACTORS"]).squeeze()
                 transition = Transition(
-                    jnp.tile(done["__all__"], env.num_agents),
-                    last_done,
-                    action.squeeze(),
-                    value.squeeze(),
-                    rewards_flat,
-                    log_prob.squeeze(),
-                    obs_batch,
-                    world_state,
-                    info,
+                    actor=ActorBatch(
+                        last_done,
+                        action.squeeze(),
+                        value.squeeze(),
+                        rewards_flat,
+                        log_prob.squeeze(),
+                        obs_batch,
+                        info,
+                    ),
+                    env=EnvBatch(
+                        done["__all__"],
+                        last_obs["world_state"],
+                    ),
                 )
                 runner_state = (
                     train_states,
@@ -434,8 +471,7 @@ def make_train(config):
                 rng,
             ) = runner_state
 
-            last_world_state = last_obs["world_state"].swapaxes(0, 1)
-            last_world_state = last_world_state.reshape((config["NUM_ACTORS"], -1))
+            last_world_state = env.broadcast_env_data(last_obs["world_state"])
 
             cr_in = (
                 last_world_state[None, :],
@@ -450,9 +486,9 @@ def make_train(config):
                 def _get_advantages(gae_and_next_value, transition):
                     gae, next_value = gae_and_next_value
                     done, value, reward = (
-                        transition.global_done,
-                        transition.value,
-                        transition.reward,
+                        env.broadcast_env_data(transition.env.global_done),
+                        transition.actor.value,
+                        transition.actor.reward,
                     )
                     delta = reward + config["GAMMA"] * next_value * (1 - done) - value
                     gae = (
@@ -468,29 +504,37 @@ def make_train(config):
                     reverse=True,
                     unroll=16,
                 )
-                return advantages, advantages + traj_batch.value
+                return advantages, advantages + traj_batch.actor.value
 
             advantages, targets = _calculate_gae(traj_batch, last_val)
 
             # NETWORKS UPDATE
             def _update_epoch(update_state, unused):
-                def _update_minbatch(train_states, batch_info):
+                def _update_minbatch(train_states, actor_indices):
                     actor_train_state, critic_train_state = train_states
-                    ac_init_hstate, cr_init_hstate, traj_batch, advantages, targets = (
-                        batch_info
+                    env_indices = actor_indices % config["NUM_ENVS"]
+                    take_actor = lambda x: jnp.take(x, actor_indices, axis=1)
+                    take_env = lambda x: jnp.take(x, env_indices, axis=1)
+                    ac_init_hstate = jnp.take(init_hstates[0], actor_indices, axis=1)
+                    cr_init_hstate = jnp.take(init_hstates[1], actor_indices, axis=1)
+                    traj_batch_mb = Transition(
+                        actor=jax.tree.map(take_actor, traj_batch.actor),
+                        env=jax.tree.map(take_env, traj_batch.env),
                     )
+                    advantages_mb = take_actor(advantages)
+                    targets_mb = take_actor(targets)
 
                     def _actor_loss_fn(actor_params, init_hstate, traj_batch, gae):
                         # RERUN NETWORK
                         _, pi = actor_network.apply(
                             actor_params,
                             init_hstate.squeeze(),
-                            (traj_batch.obs, traj_batch.done),
+                            (traj_batch.actor.obs, traj_batch.actor.done),
                         )
-                        log_prob = pi.log_prob(traj_batch.action)
+                        log_prob = pi.log_prob(traj_batch.actor.action)
 
                         # CALCULATE ACTOR LOSS
-                        logratio = log_prob - traj_batch.log_prob
+                        logratio = log_prob - traj_batch.actor.log_prob
                         ratio = jnp.exp(logratio)
                         gae = (gae - gae.mean()) / (gae.std() + 1e-8)
                         loss_actor1 = ratio * gae
@@ -527,12 +571,12 @@ def make_train(config):
                         _, value = critic_network.apply(
                             critic_params,
                             init_hstate.squeeze(),
-                            (traj_batch.world_state, traj_batch.done),
+                            (traj_batch.env.world_state, traj_batch.actor.done),
                         )
 
                         # CALCULATE VALUE LOSS
-                        value_pred_clipped = traj_batch.value + (
-                            value - traj_batch.value
+                        value_pred_clipped = traj_batch.actor.value + (
+                            value - traj_batch.actor.value
                         ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
                         value_losses = jnp.square(value - targets)
                         value_losses_clipped = jnp.square(value_pred_clipped - targets)
@@ -544,11 +588,17 @@ def make_train(config):
 
                     actor_grad_fn = jax.value_and_grad(_actor_loss_fn, has_aux=True)
                     actor_loss, actor_grads = actor_grad_fn(
-                        actor_train_state.params, ac_init_hstate, traj_batch, advantages
+                        actor_train_state.params,
+                        ac_init_hstate,
+                        traj_batch_mb,
+                        advantages_mb,
                     )
                     critic_grad_fn = jax.value_and_grad(_critic_loss_fn, has_aux=True)
                     critic_loss, critic_grads = critic_grad_fn(
-                        critic_train_state.params, cr_init_hstate, traj_batch, targets
+                        critic_train_state.params,
+                        cr_init_hstate,
+                        traj_batch_mb,
+                        targets_mb,
                     )
 
                     actor_train_state = actor_train_state.apply_gradients(
@@ -586,31 +636,8 @@ def make_train(config):
                     init_hstates,
                 )
 
-                batch = (
-                    init_hstates[0],
-                    init_hstates[1],
-                    traj_batch,
-                    advantages.squeeze(),
-                    targets.squeeze(),
-                )
                 permutation = jax.random.permutation(_rng, config["NUM_ACTORS"])
-
-                shuffled_batch = jax.tree.map(
-                    lambda x: jnp.take(x, permutation, axis=1), batch
-                )
-
-                minibatches = jax.tree.map(
-                    lambda x: jnp.swapaxes(
-                        jnp.reshape(
-                            x,
-                            [x.shape[0], config["NUM_MINIBATCHES"], -1]
-                            + list(x.shape[2:]),
-                        ),
-                        1,
-                        0,
-                    ),
-                    shuffled_batch,
-                )
+                minibatches = permutation.reshape(config["NUM_MINIBATCHES"], -1)
 
                 # train_states = (actor_train_state, critic_train_state)
                 train_states, loss_info = jax.lax.scan(
@@ -656,17 +683,17 @@ def make_train(config):
             log_wrapper_infos = jax.tree.map(
                 lambda x: jnp.nanmean(
                     jnp.where(
-                        traj_batch.info["returned_episode"],
+                        traj_batch.actor.info["returned_episode"],
                         x,
                         jnp.nan,
                     )
                 ),
                 {
-                    "returned_episode": traj_batch.info["returned_episode"],
-                    "returned_episode_lengths": traj_batch.info[
+                    "returned_episode": traj_batch.actor.info["returned_episode"],
+                    "returned_episode_lengths": traj_batch.actor.info[
                         "returned_episode_lengths"
                     ],
-                    "returned_episode_returns": traj_batch.info[
+                    "returned_episode_returns": traj_batch.actor.info[
                         "returned_episode_returns"
                     ],
                 },
@@ -676,12 +703,11 @@ def make_train(config):
             # EVALUATION
             if config.get("TEST_DURING_TRAINING", True):
                 rng, _rng = jax.random.split(rng)
+                is_eval_step = jnp.any(update_steps == config["EVAL_UPDATES"])
 
                 def eval_and_store_returns(rng, train_states):
                     eval_metrics = get_greedy_metrics(rng, train_states)
-                    idx = update_steps // int(
-                        config["NUM_UPDATES"] * config["TEST_INTERVAL"]
-                    )
+                    idx = jnp.argmax(update_steps == config["EVAL_UPDATES"])
                     _metrics_manager = EvalMetricsManager(
                         logged_eval_metrics=eval_metrics,
                         eval_returns=metrics_manager.eval_returns.at[idx].set(
@@ -691,8 +717,7 @@ def make_train(config):
                     return _metrics_manager
 
                 metrics_manager = jax.lax.cond(
-                    update_steps % int(config["NUM_UPDATES"] * config["TEST_INTERVAL"])
-                    == 0,
+                    is_eval_step,
                     lambda _: eval_and_store_returns(_rng, train_states),
                     lambda _: metrics_manager,
                     operand=None,
@@ -704,13 +729,59 @@ def make_train(config):
                     }
                 )
 
+                if early_stopping_enabled:
+                    patience_ts = config["EARLY_STOPPING_PATIENCE"]
+                    timesteps = (update_steps + 1) * config["NUM_ENVS"] * config["NUM_STEPS"]
+                    current_reward = metrics_manager.logged_eval_metrics["returned_episode_returns"]
+                    improved = ~jnp.isnan(current_reward) & (
+                        current_reward > early_stop_state["best_reward"]
+                    )
+                    new_best_reward = jnp.where(
+                        is_eval_step & improved, current_reward, early_stop_state["best_reward"]
+                    )
+                    new_timesteps_at_best = jnp.where(
+                        is_eval_step & improved,
+                        timesteps,
+                        early_stop_state["timesteps_at_best"],
+                    )
+                    new_should_stop = jnp.where(
+                        is_eval_step,
+                        (timesteps - new_timesteps_at_best) > patience_ts,
+                        early_stop_state["should_stop"],
+                    )
+                    newly_stopped = new_should_stop & ~early_stop_state["should_stop"]
+
+                    def _log_early_stop(update_steps, timesteps, best_reward):
+                        log.info(
+                            f"Early stopping at update {int(update_steps)}, "
+                            f"timestep {int(timesteps)}. "
+                            f"Best reward: {float(best_reward):.4f}"
+                        )
+
+                    jax.lax.cond(
+                        newly_stopped,
+                        lambda _: jax.debug.callback(
+                            _log_early_stop, update_steps, timesteps, new_best_reward
+                        ),
+                        lambda _: None,
+                        operand=None,
+                    )
+                    early_stop_state = {
+                        "best_reward": new_best_reward,
+                        "timesteps_at_best": new_timesteps_at_best,
+                        "should_stop": new_should_stop,
+                    }
+                    metrics.update({
+                        "early_stop/best_reward": new_best_reward,
+                        "early_stop/timesteps_without_improvement": (
+                            timesteps - new_timesteps_at_best
+                        ).astype(jnp.float32),
+                    })
+
             # CHECKPOINTING
             if config.get("SAVE_CHECKPOINTS", False):
-
                 jax.lax.cond(
-                    update_steps
-                    % int(config["NUM_UPDATES"] * config["SAVE_CHECKPOINTS_INTERVAL"])
-                    == 0,
+                    jnp.any(update_steps == config["CHECKPOINT_UPDATES"]),
                     lambda _: jax.debug.callback(
                         checkpoint_model,
                         original_seed,
@@ -754,7 +825,7 @@ def make_train(config):
                 rnorm,
                 rng,
             )
-            return (runner_state, update_steps, metrics_manager), metrics
+            return (runner_state, update_steps, metrics_manager, early_stop_state), metrics
 
         def get_greedy_metrics(rng, train_states):
             """Help function to test greedy policy during training"""
@@ -867,10 +938,9 @@ def make_train(config):
         rng, _rng = jax.random.split(rng)
 
         # Metrics Manager
-        num_evals = int(1 / config["TEST_INTERVAL"])
         metrics_manager = EvalMetricsManager(
             logged_eval_metrics=get_greedy_metrics(_rng, train_states),
-            eval_returns=jnp.zeros((num_evals,), device="cpu"),
+            eval_returns=jnp.zeros((config["NUM_EVALS"],), device="cpu"),
         )
 
         # train
@@ -884,12 +954,33 @@ def make_train(config):
             init_running_stats(),
             _rng,
         )
-        runner_state, metrics = jax.lax.scan(
-            _update_step,
-            (runner_state, 0, metrics_manager),
-            None,
-            config["NUM_UPDATES"],
-        )
+        early_stop_state = {
+            "best_reward": jnp.array(-jnp.inf, dtype=jnp.float32),
+            "timesteps_at_best": jnp.array(0, dtype=jnp.int32),
+            "should_stop": jnp.array(False, dtype=bool),
+        }
+        update_runner_state = (runner_state, 0, metrics_manager, early_stop_state)
+
+        if early_stopping_enabled:
+            def _cond_fn(update_runner_state):
+                update_steps = update_runner_state[1]
+                early_stop_state = update_runner_state[3]
+                return (update_steps < config["NUM_UPDATES"]) & (
+                    ~early_stop_state["should_stop"]
+                )
+
+            def _body_fn(update_runner_state):
+                update_runner_state, _ = _update_step(update_runner_state, None)
+                return update_runner_state
+
+            runner_state = jax.lax.while_loop(_cond_fn, _body_fn, update_runner_state)
+        else:
+            runner_state, _ = jax.lax.scan(
+                _update_step,
+                update_runner_state,
+                None,
+                config["NUM_UPDATES"],
+            )
         return {"runner_state": runner_state, "metrics": None}
 
     return train
@@ -922,9 +1013,6 @@ def single_run(config):
 
     # embedding size for the GRU, must be same as the GRU hidden size
     config["FC_DIM_SIZE"] = config["GRU_HIDDEN_DIM"]
-    config["TOTAL_TIMESTEPS"] = (
-        config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
-    )
 
     if config["SEED"] == "random":
         config["SEED"] = np.random.randint(0, 2**32 - 1)
@@ -943,11 +1031,14 @@ def single_run(config):
 
     rng = jax.random.PRNGKey(config["SEED"])
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
-    train_vjit = jax.jit(jax.vmap(make_train(config)))
-    outs = jax.block_until_ready(train_vjit(rngs))
+    train_fn = make_train(config)
+    if config["NUM_SEEDS"] == 1:
+        outs = jax.block_until_ready(jax.jit(train_fn)(rngs[0]))
+    else:
+        outs = jax.block_until_ready(jax.jit(jax.vmap(train_fn))(rngs))
 
     # wandb summary
-    metrics_manager = outs["runner_state"][-1]
+    metrics_manager = outs["runner_state"][2]
     wandb.run.summary["eval_returns"] = list(metrics_manager.eval_returns)
 
 
@@ -968,9 +1059,6 @@ def tune(default_config):
 
         # embedding size for the GRU, must be same as the GRU hidden size
         config["FC_HIDDEN_DIM"] = config["GRU_HIDDEN_DIM"]
-        config["TOTAL_TIMESTEPS"] = (
-            config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
-        )
 
         if config["SEED"] == "random":
             seed = np.random.randint(0, 2**32 - 1)

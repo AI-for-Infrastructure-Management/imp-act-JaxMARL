@@ -1,22 +1,22 @@
-"NUM_UPDATES": 100
-"NUM_ENVS": 128
-"LR": 0.001
+"TOTAL_TIMESTEPS": 50_000_000
+"NUM_ENVS": 64
+"LR": 5e-4
 "UPDATE_EPOCHS": 4
-"NUM_MINIBATCHES": 4
+"NUM_MINIBATCHES": 2
 
 "REWARD_STANDARDIZATION": True
-"MAX_GRAD_NORM": 0.25
-"ENT_COEF": 0.0
-"NUM_STEPS": 128
-"GAE_LAMBDA": 0.95
-"CLIP_EPS": 0.05
+"MAX_GRAD_NORM": 0.5
+"ENT_COEF": 0.001
+"NUM_STEPS": 256
+"GAE_LAMBDA": 0.98
+"CLIP_EPS": 0.2
 "ACTIVATION": "relu" # hardcoded in the script
 "VF_COEF": 0.5
 
 "GRU_HIDDEN_DIM": 128
 # FC_DIM_SIZE: null # embedding size for the GRU, must be same as the GRU hidden size, will be set in the script
 "GAMMA": 0.99
-"ANNEAL_LR": True
+"ANNEAL_LR": False
 "SCALE_CLIP_EPS": False
 
 # ENV
@@ -31,10 +31,9 @@
 
 # EVALUATION
 "TEST_DURING_TRAINING": True
-"TEST_INTERVAL": 0.1 # as a fraction of updates
+"TEST_INTERVAL": 0.01 # as a fraction of updates
 "TEST_NUM_STEPS": 50
 "TEST_NUM_ENVS": 1_000
-"EARLY_STOPPING_PATIENCE": 0 # timesteps without improvement to trigger early stop (0 = disabled; requires NUM_SEEDS=1)
 
 "ALG_NAME": "ippo_rnn"
 
@@ -54,7 +53,7 @@
 
 # model checkpointing (will be saved in hydra dir)
 "SAVE_CHECKPOINTS": True # save checkpoints
-"SAVE_CHECKPOINTS_INTERVAL": 0.1 # as a fraction of updates. Tipp: set to same value or fraction of TEST_INTERVAL.
+"SAVE_CHECKPOINTS_INTERVAL": 0.01 # as a fraction of updates. Tip: set to same value or fraction of TEST_INTERVAL.
 
 # precision
 "DOUBLE_PRECISION_MODE": False # use double precision for the environment
