@@ -12,26 +12,28 @@ metric:
 name: qmix_rnn_hyperparameter_tuning_cologne
 parameters:
   # --- General Hyperparameters ---
+  TOTAL_TIMESTEPS:
+    value: 20000000
   NUM_ENVS:
-    values: [8, 32]
+    value: 32
   NUM_STEPS:
     value: 51
   BUFFER_SIZE:
     value: 5000
   BUFFER_BATCH_SIZE:
-    value: 64
+    value: 32
   HIDDEN_SIZE:
-    values: [256, 512]
+    values: [128, 512]
   MAX_GRAD_NORM:
-    value: 12.5
+    value: 10
   TARGET_UPDATE_INTERVAL:
-    values: [32]
+    values: [10, 200]
   TAU:
     value: 1
   NUM_EPOCHS:
-    values: [4, 8]
+    value: 8
   LR:
-    values: [0.001, 0.0005, 0.0001]
+    values: [0.001, 0.0005, 0.0001, 0.00005]
   LEARNING_STARTS:
     value: 10000
   LR_LINEAR_DECAY:
@@ -43,21 +45,23 @@ parameters:
   EPS_START:
     value: 1
   EPS_FINISH:
-    values: [0, 0.001]
+    values: [0, 0.05]
   EPS_DECAY:
     values: [0.1, 0.2]
 
   # --- Mixer Specific ---
-  MIXER_EMBEDDING_DIM:
-    values: [32, 64]
-  MIXER_HYPERNET_HIDDEN_DIM:
-    values: [128, 256]
+  # Embedding dim and hypernet hidden dim are sampled jointly (coupled sizes)
+  # via the "_"-prefixed group: only small (32/128) and large (64/256) mixers.
+  _MIXER_SIZE:
+    values:
+      - {MIXER_EMBEDDING_DIM: 32, MIXER_HYPERNET_HIDDEN_DIM: 128}
+      - {MIXER_EMBEDDING_DIM: 64, MIXER_HYPERNET_HIDDEN_DIM: 256}
   MIXER_INIT_SCALE:
     value: 0.001
 
   # --- Environment/Reward ---
   REW_SCALE:
-    value: 1.0e-8
+    value: 1.0e-9
 
 program: experiments/qmix_rnn_road_env.py
 project: jaxMARL-Cologne-v1

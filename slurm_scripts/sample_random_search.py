@@ -55,7 +55,11 @@ def flatten_override(key: str, value) -> list[str]:
     if isinstance(value, dict):
         flattened = []
         for child_key, child_value in value.items():
-            flattened.extend(flatten_override(f"{key}.{child_key}", child_value))
+            # A parameter whose name starts with "_" is a *group*: its children
+            # expand to top-level overrides (no parent prefix), so one sampled
+            # choice can set several flat keys jointly (coupled hyperparameters).
+            child = child_key if key.startswith("_") else f"{key}.{child_key}"
+            flattened.extend(flatten_override(child, child_value))
         return flattened
     return [f"{key}={normalize_scalar(value)}"]
 
