@@ -300,7 +300,7 @@ for line in "${new_configs[@]}"; do
   # directory so every output of the trial lands in one place; +COMBO_ID and
   # +RUN_LABEL are stored in the run config to identify it in W&B later.
   printf -v command \
-    'cd %q && export WANDB_DIR=%q && %q %q --config-path %q --config-name %q hydra.run.dir=%q hydra.output_subdir=null WANDB_MODE=%q HYP_TUNE=False SAVE_PATH=%q' \
+    'cd %q && export WANDB_DIR=%q && %q %q --config-path %q --config-name %q hydra.run.dir=%q hydra.output_subdir=null WANDB_MODE=%q HYP_TUNE=False +SAVE_PATH=%q' \
     "${ROOT_DIR}" \
     "${run_scratch_path}" \
     "${PYTHON_BIN}" \
