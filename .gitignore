@@ -18,6 +18,8 @@ models/
 *.csv*
 !results.ipynb
 !Figure_8.ipynb
+!evaluation/hyperparameter_tuning_analysis.ipynb
+evaluation/data
 
 slurm_scripts/*
 # Keep the hyperparameter-tuning workflow scripts in version control
