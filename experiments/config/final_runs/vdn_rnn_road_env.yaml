@@ -35,8 +35,9 @@
 # evaluate
 "TEST_DURING_TRAINING": True
 "TEST_INTERVAL": 0.01 # as a fraction of updates
-"TEST_NUM_STEPS": 50
+"TEST_NUM_STEPS": 50 # must be a multiple of the episode horizon (50)
 "TEST_NUM_ENVS": 1_000
+"STORE_EVAL_RETURNS": True # dump raw per-episode eval returns to checkpoints/<seed>/eval_returns_<update>.csv.
 
 "ALG_NAME": "vdn_rnn"
 

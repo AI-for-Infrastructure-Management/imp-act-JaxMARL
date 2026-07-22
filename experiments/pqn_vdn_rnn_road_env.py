@@ -27,6 +27,8 @@ from jaxmarl.wrappers.baselines import (
     LogWrapper,
     CTRolloutManager,
     save_params,
+    resolve_episode_horizon,
+    make_store_eval_returns,
 )
 
 # Get Hydra's logger
@@ -137,6 +139,9 @@ def make_train(config, env):
     config["EVAL_UPDATES"] = jnp.asarray(
         np.linspace(1, config["NUM_UPDATES"], config["NUM_EVALS"], dtype=int)
     )
+
+    episode_horizon = resolve_episode_horizon(config, env)
+
     if config.get("SAVE_CHECKPOINTS", False):
         config["NUM_CHECKPOINTS"] = int(1 / config["SAVE_CHECKPOINTS_INTERVAL"])
         config["CHECKPOINT_UPDATES"] = jnp.asarray(
@@ -259,7 +264,9 @@ def make_train(config, env):
         # TRAINING LOOP
         def _update_step(runner_state, unused):
 
-            train_state, memory_transitions, expl_state, test_state, rng = runner_state
+            train_state, memory_transitions, expl_state, test_state, eval_raw_returns, rng = (
+                runner_state
+            )
 
             # SAMPLE PHASE
             def _step_env(carry, _):
@@ -509,13 +516,26 @@ def make_train(config, env):
 
             if config.get("TEST_DURING_TRAINING", True):
                 rng, _rng = jax.random.split(rng)
-                test_state = jax.lax.cond(
+                test_state, eval_raw_returns = jax.lax.cond(
                     jnp.any(train_state.n_updates == config["EVAL_UPDATES"]),
                     lambda _: get_greedy_metrics(_rng, train_state),
-                    lambda _: test_state,
+                    lambda _: (test_state, eval_raw_returns),
                     operand=None,
                 )
                 metrics.update({"test_" + k: v for k, v in test_state.items()})
+
+                # STORE RAW EVAL RETURNS
+                if config.get("STORE_EVAL_RETURNS", False):
+                    jax.lax.cond(
+                        jnp.any(train_state.n_updates == config["EVAL_UPDATES"]),
+                        lambda: jax.debug.callback(
+                            store_eval_returns,
+                            original_seed,
+                            eval_raw_returns,
+                            train_state.n_updates,
+                        ),
+                        lambda: None,
+                    )
 
             # report on wandb if required
             if config["WANDB_MODE"] != "disabled":
@@ -556,6 +576,7 @@ def make_train(config, env):
                 memory_transitions,
                 expl_state,
                 test_state,
+                eval_raw_returns,
                 rng,
             )
 
@@ -564,7 +585,7 @@ def make_train(config, env):
         def get_greedy_metrics(rng, train_state):
             """Help function to test greedy policy during training"""
             if not config.get("TEST_DURING_TRAINING", True):
-                return None
+                return None, None
 
             def _greedy_env_step(step_state, unused):
                 env_state, last_obs, last_dones, hstate, rng = step_state
@@ -623,8 +644,19 @@ def make_train(config, env):
                 ),
                 infos,
             )
-            return metrics
-        
+
+            # Raw per-episode returns for one agent (all agents share the same
+            # reward). Episodes are synchronized across envs by the fixed
+            # horizon, so they can be sliced at those boundaries instead of
+            # masked, avoiding a dynamic shape.
+            raw_returns = infos["returned_episode_returns"][
+                episode_horizon - 1 :: episode_horizon, :, 0
+            ].reshape(-1)
+
+            return metrics, raw_returns
+
+        store_eval_returns = make_store_eval_returns(config)
+
         def checkpoint_model(vmapped_seed, train_state, step):
             save_dir = os.path.join(
                 config["HYDRA_PATH"] ,
@@ -648,7 +680,7 @@ def make_train(config, env):
             save_params(params_to_save, save_path)
 
         rng, _rng = jax.random.split(rng)
-        test_state = get_greedy_metrics(_rng, train_state)
+        test_state, eval_raw_returns = get_greedy_metrics(_rng, train_state)
 
         rng, _rng = jax.random.split(rng)
         obs, env_state = wrapped_env.batch_reset(_rng)
@@ -711,7 +743,14 @@ def make_train(config, env):
 
         # train
         rng, _rng = jax.random.split(rng)
-        runner_state = (train_state, memory_transitions, expl_state, test_state, _rng)
+        runner_state = (
+            train_state,
+            memory_transitions,
+            expl_state,
+            test_state,
+            eval_raw_returns,
+            _rng,
+        )
 
         runner_state, metrics = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
