@@ -44,7 +44,7 @@ JOBS="10"
 # Suggested project convention: {alg}-hypers-sweep-{map},
 # e.g. "mappo-hypers-sweep-cologne-v1".
 ENTITY="imp-act"
-PROJECT=""
+PROJECT="hyper_parameter_tuning"
 
 [ -n "${PROJECT}" ] || { echo "Set PROJECT before running." >&2; exit 1; }
 

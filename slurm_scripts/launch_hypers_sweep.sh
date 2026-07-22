@@ -133,9 +133,9 @@ TIME_LIMITS["toy_example_v2,ippo_rnn"]="01:30:00"
 
 # Cologne-v1
 TIME_LIMITS["cologne_v1,vdn_rnn"]="04:30:00"
-TIME_LIMITS["cologne_v1,qmix_rnn"]="02:00:00"
-TIME_LIMITS["cologne_v1,pqn_rnn"]="17:00:00"
-TIME_LIMITS["cologne_v1,mappo_rnn"]="04:00:00"
+TIME_LIMITS["cologne_v1,qmix_rnn"]="12:00:00"
+TIME_LIMITS["cologne_v1,pqn_rnn"]="10:00:00"
+TIME_LIMITS["cologne_v1,mappo_rnn"]="08:00:00"
 TIME_LIMITS["cologne_v1,ippo_rnn"]="04:00:00"
 
 # CologneBonnDusseldorf-v1
