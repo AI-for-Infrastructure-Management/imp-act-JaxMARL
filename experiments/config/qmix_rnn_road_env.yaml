@@ -36,7 +36,6 @@
 "TEST_INTERVAL": 0.01 # as a fraction of updates
 "TEST_NUM_STEPS": 51
 "TEST_NUM_ENVS": 1000
-"EARLY_STOPPING_PATIENCE": 0 # timesteps without improvement to trigger early stop (0 = disabled; requires NUM_SEEDS=1)
 
 "ALG_NAME": "qmix_rnn"
 
