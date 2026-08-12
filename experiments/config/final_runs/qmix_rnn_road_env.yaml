@@ -2,7 +2,7 @@
 # Hyperparameters: best combo C0007 from the 50-combo Cologne-v1 sweep
 # (see evaluation/hyperparameter_tuning_analysis.ipynb).
 
-"TOTAL_TIMESTEPS": 20_000_000
+"TOTAL_TIMESTEPS": 50_000_000
 "NUM_ENVS": 32
 "NUM_STEPS": 51
 "BUFFER_SIZE": 5000
@@ -10,7 +10,7 @@
 "HIDDEN_SIZE": 128
 "EPS_START": 1.0
 "EPS_FINISH": 0.0
-"EPS_DECAY": 0.1 # percentage of updates
+"EPS_DECAY": 0.04 # percentage of updates
 "MAX_GRAD_NORM": 10
 "TARGET_UPDATE_INTERVAL": 200
 "TAU": 1.0
