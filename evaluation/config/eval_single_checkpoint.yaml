@@ -1,4 +1,6 @@
-# Configuration file for PQN RNN evaluation on Road environments
+# Single-checkpoint evaluation, shared by every evaluation/<alg>_rnn_road_env.py.
+# Those scripts evaluate ONE checkpoint and log metrics; they do not write the
+# inference_results.csv schema — use generate_eval_returns.py for that.
 CHECKPOINT_PATH: Null  # Path to the checkpoint directory containing config.yaml and the checkpoints folder
 STEP: Null  # The step number of the checkpoint to evaluate
 VMAPPED_SEED: 0  # Which vmapped seed to use (if multiple were used during training)
