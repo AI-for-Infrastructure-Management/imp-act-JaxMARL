@@ -28,7 +28,12 @@ import hydra
 from omegaconf import OmegaConf
 
 import jaxmarl
-from jaxmarl.wrappers.baselines import LogWrapper, save_params
+from jaxmarl.wrappers.baselines import (
+    LogWrapper,
+    save_params,
+    resolve_episode_horizon,
+    make_store_eval_returns,
+)
 
 # Get Hydra's logger
 log = logging.getLogger(__name__)
@@ -192,6 +197,9 @@ def make_train(config):
     config["EVAL_UPDATES"] = jnp.asarray(
         np.linspace(0, config["NUM_UPDATES"] - 1, config["NUM_EVALS"], dtype=int)
     )
+
+    episode_horizon = resolve_episode_horizon(config, env)
+
     if config.get("SAVE_CHECKPOINTS", False):
         config["NUM_CHECKPOINTS"] = int(1 / config["SAVE_CHECKPOINTS_INTERVAL"])
         config["CHECKPOINT_UPDATES"] = jnp.asarray(
@@ -260,7 +268,9 @@ def make_train(config):
         # TRAIN LOOP
         def _update_step(update_runner_state, unused):
             # COLLECT TRAJECTORIES
-            runner_state, update_steps, metrics_manager = update_runner_state
+            runner_state, update_steps, eval_raw_returns, metrics_manager = (
+                update_runner_state
+            )
 
             def _env_step(runner_state, unused):
                 (
@@ -544,7 +554,7 @@ def make_train(config):
                 rng, _rng = jax.random.split(rng)
 
                 def eval_and_store_returns(rng, train_state):
-                    eval_metrics = get_greedy_metrics(rng, train_state)
+                    eval_metrics, raw_returns = get_greedy_metrics(rng, train_state)
                     idx = jnp.argmax(update_steps == config["EVAL_UPDATES"])
                     _metrics_manager = EvalMetricsManager(
                         logged_eval_metrics=eval_metrics,
@@ -552,12 +562,12 @@ def make_train(config):
                             eval_metrics["returned_episode_returns"]
                         ),
                     )
-                    return _metrics_manager
+                    return _metrics_manager, raw_returns
 
-                metrics_manager = jax.lax.cond(
+                metrics_manager, eval_raw_returns = jax.lax.cond(
                     jnp.any(update_steps == config["EVAL_UPDATES"]),
                     lambda _: eval_and_store_returns(_rng, train_state),
-                    lambda _: metrics_manager,
+                    lambda _: (metrics_manager, eval_raw_returns),
                     operand=None,
                 )
                 metrics.update(
@@ -566,6 +576,19 @@ def make_train(config):
                         for k, v in metrics_manager.logged_eval_metrics.items()
                     }
                 )
+
+                # STORE RAW EVAL RETURNS
+                if config.get("STORE_EVAL_RETURNS", False):
+                    jax.lax.cond(
+                        jnp.any(update_steps == config["EVAL_UPDATES"]),
+                        lambda: jax.debug.callback(
+                            store_eval_returns,
+                            original_seed,
+                            eval_raw_returns,
+                            update_steps,
+                        ),
+                        lambda: None,
+                    )
 
             # CHECKPOINTING
             if config.get("SAVE_CHECKPOINTS", False):
@@ -614,12 +637,17 @@ def make_train(config):
                 rnorm,
                 rng,
             )
-            return (runner_state, update_steps, metrics_manager), metrics
+            return (
+                runner_state,
+                update_steps,
+                eval_raw_returns,
+                metrics_manager,
+            ), metrics
 
         def get_greedy_metrics(rng, train_state):
             """Help function to test greedy policy during training"""
             if not config.get("TEST_DURING_TRAINING", True):
-                return None
+                return None, None
 
             config["TEST_NUM_ACTORS"] = config["TEST_NUM_ENVS"] * env.num_agents
 
@@ -681,7 +709,18 @@ def make_train(config):
                 ),
                 infos,
             )
-            return metrics
+
+            # One agent's return per episode (agents share the reward). Envs
+            # finish episodes in lockstep, so we slice at those boundaries
+            # instead of masking. infos is flattened over (env, agent), so
+            # agent 0 is every num_agents-th entry.
+            raw_returns = infos["returned_episode_returns"][
+                episode_horizon - 1 :: episode_horizon, :: env.num_agents
+            ].reshape(-1)
+
+            return metrics, raw_returns
+
+        store_eval_returns = make_store_eval_returns(config)
 
         def checkpoint_model(vmapped_seed, train_state, step, rnorm):
             save_dir = os.path.join(
@@ -716,8 +755,9 @@ def make_train(config):
         rng, _rng = jax.random.split(rng)
 
         # Metrics Manager
+        logged_eval_metrics, eval_raw_returns = get_greedy_metrics(_rng, train_state)
         metrics_manager = EvalMetricsManager(
-            logged_eval_metrics=get_greedy_metrics(_rng, train_state),
+            logged_eval_metrics=logged_eval_metrics,
             eval_returns=jnp.zeros((config["NUM_EVALS"],), device="cpu"),
         )
 
@@ -734,7 +774,7 @@ def make_train(config):
         )
         runner_state, metrics = jax.lax.scan(
             _update_step,
-            (runner_state, 0, metrics_manager),
+            (runner_state, 0, eval_raw_returns, metrics_manager),
             None,
             config["NUM_UPDATES"],
         )

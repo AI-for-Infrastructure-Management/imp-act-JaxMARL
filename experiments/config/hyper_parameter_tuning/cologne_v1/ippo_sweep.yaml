@@ -5,32 +5,31 @@ command:
   - --config-path=./config/hyper_parameter_tuning/cologne_v1
 entity: imp-act
 method: random
+SWEEP_SEEDS: [101, 102, 103]
 metric:
   goal: maximize
   name: test_returned_episode_returns
 name: ippo_rnn_hyperparameter_tuning
 parameters:
   # --- General Hyperparameters ---
-  NUM_UPDATES:
-    value: 1500
   NUM_ENVS:
-    values: [32, 64, 128]
+    values: [64, 128]
   LR:
-    values: [1e-3, 1e-4]
+    values: [5e-4, 2.5e-4, 1e-4]
   UPDATE_EPOCHS:
-    value: 4
+    values: [4, 8]
   NUM_MINIBATCHES:
-    values: [2, 8]
+    values: [2, 4]
   REWARD_STANDARDIZATION:
     value: True
   MAX_GRAD_NORM:
     value: 0.5
   ENT_COEF:
-    value: 0.0
+    value: 0.001
   NUM_STEPS:
     values: [128, 256]
   GAE_LAMBDA:
-    values: [0.95, 1.0]
+    values: [0.95, 0.98]
   CLIP_EPS:
     values: [0.1, 0.2]
   ACTIVATION:
@@ -38,30 +37,14 @@ parameters:
   VF_COEF:
     value: 0.5
   GRU_HIDDEN_DIM:
-    values: [64, 128]
+    value: 128
   # FC_DIM_SIZE: ~ # embedding size for the GRU, must be same as the GRU hidden size, will be set in the script
   GAMMA:
     value: 0.99
   ANNEAL_LR:
-    value: True
+    value: False
   SCALE_CLIP_EPS:
     value: False
   
-  # --- Environment Configuration ---
-  ENV_KWARGS:
-    values:
-      - encoding_type: binary
-        include_extra_observations:
-          segment_lengths: true
-          volumes: true
-          capacity: false
-        map_name: Cologne-v1
-      - encoding_type: none
-        include_extra_observations:
-          segment_lengths: true
-          volumes: true
-          capacity: false
-        map_name: Cologne-v1
-
 program: experiments/ippo_rnn_road_env.py
 project: jaxMARL-Cologne-v1

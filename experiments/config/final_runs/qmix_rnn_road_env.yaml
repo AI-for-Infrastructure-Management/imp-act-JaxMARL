@@ -3,7 +3,7 @@
 # Supplemental Table 8 ("Table 8: Q-Learning hyperparameters for MPE, SMAX and Overcooked")
 
 "TOTAL_TIMESTEPS": 20_000_000
-"NUM_ENVS": 32
+"NUM_ENVS": 16
 "NUM_STEPS": 128
 "BUFFER_SIZE": 5000
 "BUFFER_BATCH_SIZE": 32
@@ -26,7 +26,7 @@
 # ENV
 "ENV_NAME": "road_env"
 "ENV_KWARGS":
-  "map_name": "Cologne-v1"
+  "map_name": "ToyExample-v2"
   "encoding_type": "none"       # can be binary, one-hot, sinusoidal or none
   "include_extra_observations":
     "segment_lengths": True     # Length of the segments
@@ -38,8 +38,9 @@
 # evaluate
 "TEST_DURING_TRAINING": True
 "TEST_INTERVAL": 0.01 # as a fraction of updates
-"TEST_NUM_STEPS": 50
+"TEST_NUM_STEPS": 50 # must be a multiple of the episode horizon (50)
 "TEST_NUM_ENVS": 1000
+"STORE_EVAL_RETURNS": True # dump raw per-episode eval returns to checkpoints/<seed>/eval_returns_<update>.csv.
 
 "ALG_NAME": "qmix_rnn"
 

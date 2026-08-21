@@ -2,67 +2,58 @@ command:
   - ${env}
   - python
   - ${program}
-  - --config-path=./config/hyper_parameter_tuning/cologne_bonn_dusseldorf_v1
+  - --config-path=./config/hyper_parameter_tuning/cologne_v1
 entity: imp-act
 method: random
+SWEEP_SEEDS: [101, 102, 103]
 metric:
   goal: maximize
   name: test_returned_episode_returns
 name: pqn_rnn_hyperparameter_tuning
 parameters:
   # --- General Hyperparameters ---
-  NUM_UPDATES:
-    value: 2000
+  TOTAL_TIMESTEPS:
+    value: 50000000
   NUM_ENVS:
-    values: [128, 256]
+    value: 128
   NUM_STEPS:
     value: 51
   MEMORY_WINDOW:
     value: 4
   HIDDEN_SIZE:
-    values: [64, 128]
+    values: [128, 512]
   NUM_LAYERS:
     value: 2
   NORM_INPUT:
     value: True
   NORM_TYPE:
-    value: "batch_norm"
+    values: ["batch_norm", "layer_norm"]
   MAX_GRAD_NORM:
-    value: 1
+    values: [0.5, 1]
   NUM_MINIBATCHES:
     value: 16
   NUM_EPOCHS:
     value: 4
   LR:
-    value: 0.0001 # 1e-4
+    values: [0.0001, 0.00025] # 1e-4, 2.5e-4
   LR_LINEAR_DECAY:
     value: False
   GAMMA:
     value: 0.99
   LAMBDA:
-    value: 0.85
+    values: [0.65, 0.85, 0.95]
 
   # --- Exploration ---
   EPS_START:
     value: 1
   EPS_FINISH:
-    value: 0
+    values: [0, 0.01]
   EPS_DECAY:
-    value: 0.1
+    values: [0.1, 0.2]
 
   # --- Environment/Reward ---
   REW_SCALE:
     value: 1.0e-9 # 1.00E-09
 
-  # --- Environment Configuration ---
-  ENV_KWARGS:
-    value:
-      encoding_type: none
-      include_extra_observations:
-        segment_lengths: true
-        volumes: true
-        capacity: false
-      map_name: CologneBonnDusseldorf-v1
-
 program: experiments/pqn_vdn_rnn_road_env.py
-project: jaxMARL-CologneBonnDusseldorf-v1
+project: jaxMARL-Cologne-v1
