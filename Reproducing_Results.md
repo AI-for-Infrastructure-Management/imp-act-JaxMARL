@@ -129,11 +129,38 @@ You can use this script to download all data available in the repository:
 
 Then, to evaluate checkpoints, use the commands in the following sections.
 
+### How evaluation is organised
+
+Evaluation has **one artifact and one consumer**:
+
+```
+training (STORE_EVAL_RETURNS) ─┐
+                               ├─→ eval_returns_<step>.csv ─→ compute_eval_statistics.py ─→ inference_results.csv
+generate_eval_returns.py ──────┘      raw episode returns          statistics + splits
+```
+
+`generate_eval_returns.py` re-runs greedy inference and **writes returns**; it computes
+no statistics. `compute_eval_statistics.py` is the only thing that bootstraps or emits
+a results row, whichever producer the returns came from. So there is exactly one
+implementation of the table, and the expensive step (inference, GPU) can be re-run
+independently of the cheap one (~1.6 s of bootstrap per checkpoint, CPU).
+
+| Section | Reads | Produces | Requires |
+|---|---|---|---|
+| [By algorithm](#evaluating-checkpoints-by-algorithm) / [multiple checkpoints](#evaluating-multiple-checkpoints) | saved checkpoints | raw returns under `<run>/eval_returns/`, then the table | JAX, GPU |
+| [Computing the results table](#computing-the-results-table) | raw returns from either producer | `inference_results.csv` + per-map/algorithm splits | numpy, scipy, pyyaml |
+| [Single checkpoints](#evaluating-single-checkpoints) | one checkpoint | metrics logged to the console | JAX, GPU |
+
+If a run was trained with `STORE_EVAL_RETURNS: True` you need no GPU at all — the
+evaluation already happened during training, so go straight to the second section. Use the
+first for runs without stored returns, or to evaluate a **variant** such as budget-aware
+VDN, which re-runs inference with a different action rule over the same checkpoints.
+
 ## Evaluating checkpoints by algorithm
 To evaluate a folder containing checkpoints of a single algorithm for one environment, use the following command:
 
 ```bash
-python evaluation/evaluate_runs.py --config-path "config/final_run_evaluations/{ENV}/" --config-name "{ALG}"
+python evaluation/generate_eval_returns.py --config-path "config/final_run_evaluations/{ENV}/" --config-name "{ALG}"
 ```
 
 Where `{ENV}` is the environment you want to run the evaluation for. The options are:
@@ -154,12 +181,60 @@ And `{ALG}` is the algorithm you want to run Also budget aware $\text{VDN}_\text
 To evaluate a folder possibly containing multiple algorithms and checkpoints, use the following command:
 
 ```bash
-python evaluation/evaluate_runs.py EVALUATION_PATH="{EVALUATION_PATH}" TEST_NUM_ENVS={TEST_NUM_ENVS}
+python evaluation/generate_eval_returns.py EVALUATION_PATH="{EVALUATION_PATH}" TEST_NUM_ENVS={TEST_NUM_ENVS}
 ```
 Where
 - `{EVALUATION_PATH}` is the path to the folder containing the checkpoints you want to evaluate.
 
 Depending on the available GPU VRAM you can set the amount of parallel environments TEST_NUM_ENVS to reduce the memory usage. The default value is 10000, so all evaluation episodes are run in parallel.
+
+### Where the returns go, and re-running
+
+Both commands above write raw returns to `<run>/eval_returns/<algorithm>/seed<EVAL_SEED>/`,
+alongside an `eval_meta.yaml` recording what produced them. Keying on the algorithm variant
+and the eval seed means a budget-aware pass cannot collide with a plain one, nor with the
+returns training wrote for itself.
+
+A directory that already holds a complete set is **skipped**, so an interrupted run can
+simply be repeated; `FORCE=true` re-evaluates anyway.
+
+The results table is then built by [`compute_eval_statistics.py`](#computing-the-results-table),
+which runs automatically at the end. On a cluster, set `WRITE_RESULTS_TABLE=false` in the
+array task and run one table pass over the whole tree afterwards — otherwise every task
+rebuilds the same table.
+
+
+## Computing the results table
+This is what turns raw returns into the results table, whether they were written during
+training (`STORE_EVAL_RETURNS: True`) or by `generate_eval_returns.py`. No inference is
+re-run and no GPU is needed:
+
+```bash
+python evaluation/compute_eval_statistics.py
+python evaluation/compute_eval_statistics.py {RUN_ROOT} --workers 32
+```
+
+With no arguments it reads `outputs/`, where hydra writes runs, and writes to
+`evaluation/results/`. `{RUN_ROOT}` may be any directory above the runs — the run
+directories are found by locating the eval returns and walking up to the nearest
+`config.yaml`, so the layout does not matter.
+
+Useful options:
+- `--workers {N}` — parallel processes. The bootstrap dominates, at roughly 1.6 s and
+  0.4 GB per checkpoint for 10 000-episode evaluations.
+- `--resume` — skip checkpoints already present in an existing `inference_results.csv`.
+- `--dry-run` — report what was found without computing anything.
+
+Provenance comes from an `eval_meta.yaml` sidecar where one exists (returns produced by
+`generate_eval_returns.py`), and otherwise from the run's own `config.yaml`. Returns
+written during training have no fixed eval seed — their draws come from the training RNG —
+so `eval_seed` is empty on those rows and set on post-hoc ones. That does not affect a
+per-checkpoint mean or confidence interval, but comparisons relying on the same eval draws
+across runs need a post-hoc pass at a fixed `EVAL_SEED`.
+
+A run can hold several evaluations at once — the one training wrote, plus one per
+(algorithm variant, eval seed) — and they come out as separate rows, distinguished by the
+`algorithm` and `eval_seed` columns.
 
 
 ## Evaluating single checkpoints

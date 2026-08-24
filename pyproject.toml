@@ -43,6 +43,7 @@ dependencies = [
   "matplotlib",
   "pillow",
   "scipy<=1.12",
+  "pyyaml",
   "gymnax==0.0.6",
 ]
 
