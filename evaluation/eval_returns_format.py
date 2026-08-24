@@ -37,8 +37,9 @@ def write_eval_returns(path, returns):
     `episode_return` header and no comment prefix — hence the default `%.18e`.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savetxt(path, np.asarray(returns), delimiter=",",
-               header="episode_return", comments="")
+    np.savetxt(
+        path, np.asarray(returns), delimiter=",", header="episode_return", comments=""
+    )
 
 
 def read_eval_returns(path):
@@ -95,8 +96,9 @@ def eval_returns_complete(eval_dir, expected_files):
     """
     if read_eval_meta(eval_dir) is None:
         return False
-    written = sum(1 for name in os.listdir(eval_dir)
-                  if name.startswith(EVAL_RETURNS_PREFIX))
+    written = sum(
+        1 for name in os.listdir(eval_dir) if name.startswith(EVAL_RETURNS_PREFIX)
+    )
     return written == expected_files
 
 

@@ -12,26 +12,24 @@ runs automatically at the end unless WRITE_RESULTS_TABLE is false.
     python evaluation/generate_eval_returns.py EVALUATION_PATH="data/models/Cologne-v1" TEST_NUM_ENVS=1000
 """
 
-import os
-import numpy as np
 import logging
-import yaml
-import hydra
-from omegaconf import OmegaConf
-import time 
-import jax
+import os
+import time
 from pathlib import Path
 
-import jaxmarl
-from jaxmarl.wrappers.baselines import load_params
-
-import qmix_rnn_road_env
-import vdn_rnn_road_env
-import vdn_ba_rnn_road_env
-import mappo_rnn_road_env
+import hydra
 import ippo_rnn_road_env
+import jax
+import mappo_rnn_road_env
+import numpy as np
 import pqn_rnn_road_env
-
+import qmix_rnn_road_env
+import vdn_ba_rnn_road_env
+import vdn_rnn_road_env
+import yaml
+from compute_eval_statistics import DEFAULT_OUTPUT as DEFAULT_RESULTS_SUBDIR
+from compute_eval_statistics import EPISODE_HORIZON
+from compute_eval_statistics import main as compute_statistics_main
 from eval_returns_format import (
     eval_returns_complete,
     eval_returns_dir,
@@ -39,9 +37,10 @@ from eval_returns_format import (
     write_eval_meta,
     write_eval_returns,
 )
-from compute_eval_statistics import DEFAULT_OUTPUT as DEFAULT_RESULTS_SUBDIR
-from compute_eval_statistics import EPISODE_HORIZON
-from compute_eval_statistics import main as compute_statistics_main
+from omegaconf import OmegaConf
+
+import jaxmarl
+from jaxmarl.wrappers.baselines import load_params
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +64,7 @@ def get_greedy_metric_fn(algorithm):
 
 ############################ EVALUATION ################################
 
+
 def evaluate_checkpoint(path, config):
     """Write raw per-episode eval returns for every checkpoint of one run.
 
@@ -77,11 +77,11 @@ def evaluate_checkpoint(path, config):
     rngs = jax.random.split(
         jax.random.PRNGKey(train_config["SEED"]), train_config["NUM_SEEDS"]
     )
-    vmapped_seed_key = str(rngs[config['VMAPPED_SEED']][0])
+    vmapped_seed_key = str(rngs[config["VMAPPED_SEED"]][0])
     checkpoint_path = path / "checkpoints" / vmapped_seed_key
 
-    algorithm = resolve_algorithm(train_config['ALG_NAME'], config['EVAL_VDN_BA'])
-    out_dir = eval_returns_dir(path, algorithm, config['EVAL_SEED'])
+    algorithm = resolve_algorithm(train_config["ALG_NAME"], config["EVAL_VDN_BA"])
+    out_dir = eval_returns_dir(path, algorithm, config["EVAL_SEED"])
 
     # Filter on the extension rather than taking the directory listing whole: a
     # real run's checkpoint directory can hold entries that are not checkpoints, and
@@ -98,8 +98,10 @@ def evaluate_checkpoint(path, config):
 
     # The artifact is its own cache: a complete directory is skippable and a partial
     # one is visibly partial.
-    if not config['FORCE'] and eval_returns_complete(out_dir, len(checkpoint_files)):
-        log.info(f"{out_dir} already complete ({len(checkpoint_files)} evals), skipping")
+    if not config["FORCE"] and eval_returns_complete(out_dir, len(checkpoint_files)):
+        log.info(
+            f"{out_dir} already complete ({len(checkpoint_files)} evals), skipping"
+        )
         return None
 
     env = jaxmarl.make(train_config["ENV_NAME"], **train_config["ENV_KWARGS"])
@@ -109,7 +111,9 @@ def evaluate_checkpoint(path, config):
     make_get_greedy_metrics = get_greedy_metric_fn(algorithm)
 
     jit_get_greedy_metrics = jax.jit(
-        make_get_greedy_metrics(train_config, config['TEST_NUM_ENVS'], config['TEST_NUM_STEPS'])
+        make_get_greedy_metrics(
+            train_config, config["TEST_NUM_ENVS"], config["TEST_NUM_STEPS"]
+        )
     )
 
     log.info(f"Evaluating {len(checkpoint_files)} checkpoints -> {out_dir}")
@@ -121,7 +125,7 @@ def evaluate_checkpoint(path, config):
         safetensor_path = os.path.join(checkpoint_path, safetensor_name)
         loaded_params = load_params(safetensor_path)
 
-        rng = jax.random.PRNGKey(config['EVAL_SEED'])
+        rng = jax.random.PRNGKey(config["EVAL_SEED"])
         infos = jit_get_greedy_metrics(rng, loaded_params)
 
         # infos["returned_episode_returns"] | shape: (NUM_TIME_STEPS, NUM_ENVS, NUM_AGENTS)
@@ -129,9 +133,7 @@ def evaluate_checkpoint(path, config):
         # and reshapes it to (NUM_EPISODES, NUM_AGENTS). This is required when NUM_ENVS
         # cannot fit in memory, and we must process them in batches. Since all agents
         # have same rewards, we only take the first agent's rewards.
-        _episode_returns = infos["returned_episode_returns"][
-            infos["returned_episode"]
-        ]
+        _episode_returns = infos["returned_episode_returns"][infos["returned_episode"]]
         episode_returns = _episode_returns.reshape(-1, env.num_agents)[:, 0]
 
         # float64 on the way out, so the file carries full precision and the
@@ -141,7 +143,9 @@ def evaluate_checkpoint(path, config):
 
         # Same filename the trainer uses, keeping the checkpoint's own id and
         # zero-padding so the join back to checkpoint_<id>.safetensors is exact.
-        write_eval_returns(out_dir / f"eval_returns_{checkpoint_id}.csv", episode_returns)
+        write_eval_returns(
+            out_dir / f"eval_returns_{checkpoint_id}.csv", episode_returns
+        )
 
         log.info(
             f" Algorithm: {algorithm:<12} | Seed: {vmapped_seed_key:<10}"
@@ -154,13 +158,13 @@ def evaluate_checkpoint(path, config):
     write_eval_meta(
         out_dir,
         algorithm=algorithm,
-        eval_seed=config['EVAL_SEED'],
-        vmapped_seed=config['VMAPPED_SEED'],
+        eval_seed=config["EVAL_SEED"],
+        vmapped_seed=config["VMAPPED_SEED"],
         vmapped_seed_key=vmapped_seed_key,
-        map_name=train_config['ENV_KWARGS']['map_name'],
-        train_alg_name=train_config['ALG_NAME'],
-        test_num_envs=config['TEST_NUM_ENVS'],
-        test_num_steps=config['TEST_NUM_STEPS'],
+        map_name=train_config["ENV_KWARGS"]["map_name"],
+        train_alg_name=train_config["ALG_NAME"],
+        test_num_envs=config["TEST_NUM_ENVS"],
+        test_num_steps=config["TEST_NUM_STEPS"],
         num_episodes=num_episodes,
         num_checkpoints=len(checkpoint_files),
     )
@@ -168,27 +172,29 @@ def evaluate_checkpoint(path, config):
 
 
 def evaluate_checkpoints(config):
-    config['BASE_PATH'] = config.get('BASE_PATH') or os.getcwd()
-    base_path = Path(config['BASE_PATH'])
+    config["BASE_PATH"] = config.get("BASE_PATH") or os.getcwd()
+    base_path = Path(config["BASE_PATH"])
 
     # The per-algorithm configs under config/final_run_evaluations/<env>/ are
     # standalone — hydra loads one as the whole config with no merge against
     # generate_eval_returns.yaml — so they carry none of these keys. Default
     # them here rather than indexing them directly downstream.
-    config.setdefault('EVAL_VDN_BA', False)
-    config.setdefault('FORCE', False)
-    config.setdefault('WRITE_RESULTS_TABLE', True)
-    config.setdefault('RESULTS_PATH', None)
+    config.setdefault("EVAL_VDN_BA", False)
+    config.setdefault("FORCE", False)
+    config.setdefault("WRITE_RESULTS_TABLE", True)
+    config.setdefault("RESULTS_PATH", None)
 
     # Every env yields one episode per EPISODE_HORIZON steps, so the episode count
     # must fill the env/step grid exactly or the eval would hold a different number
     # of episodes than requested.
-    if config['TEST_NUM_EPISODES'] % config['TEST_NUM_ENVS'] != 0:
+    if config["TEST_NUM_EPISODES"] % config["TEST_NUM_ENVS"] != 0:
         raise ValueError(
             f"TEST_NUM_EPISODES ({config['TEST_NUM_EPISODES']}) must be a multiple "
             f"of TEST_NUM_ENVS ({config['TEST_NUM_ENVS']})"
         )
-    config['TEST_NUM_STEPS'] = EPISODE_HORIZON * (config['TEST_NUM_EPISODES'] // config['TEST_NUM_ENVS'])
+    config["TEST_NUM_STEPS"] = EPISODE_HORIZON * (
+        config["TEST_NUM_EPISODES"] // config["TEST_NUM_ENVS"]
+    )
 
     def find_run_directories_recursively(path):
         # detect if this is a run directory
@@ -203,7 +209,7 @@ def evaluate_checkpoints(config):
 
         return run_paths
 
-    evaluation_path = Path(config.get('EVALUATION_PATH') or base_path / "outputs")
+    evaluation_path = Path(config.get("EVALUATION_PATH") or base_path / "outputs")
     if not evaluation_path.exists():
         raise FileNotFoundError(f"Evaluation path {evaluation_path} does not exist")
 
@@ -226,18 +232,22 @@ def evaluate_checkpoints(config):
         f"in {time.time()-time_main_0:.2f}s"
     )
 
-    if not config['WRITE_RESULTS_TABLE']:
-        log.info("WRITE_RESULTS_TABLE is false — run compute_eval_statistics.py "
-                 "over the tree to build the results table")
+    if not config["WRITE_RESULTS_TABLE"]:
+        log.info(
+            "WRITE_RESULTS_TABLE is false — run compute_eval_statistics.py "
+            "over the tree to build the results table"
+        )
         return written
 
-    results_path = Path(config['RESULTS_PATH'] or base_path / DEFAULT_RESULTS_SUBDIR)
+    results_path = Path(config["RESULTS_PATH"] or base_path / DEFAULT_RESULTS_SUBDIR)
     log.info(f"Building the results table from {evaluation_path} -> {results_path}")
     compute_statistics_main([str(evaluation_path), "-o", str(results_path)])
     return written
 
 
-@hydra.main(version_base=None, config_path="./config", config_name="generate_eval_returns")
+@hydra.main(
+    version_base=None, config_path="./config", config_name="generate_eval_returns"
+)
 def main(config):
     config_dict = OmegaConf.to_container(config, resolve=True)
     print(f"Configuration:\n{yaml.dump(config_dict, default_flow_style=False)}")

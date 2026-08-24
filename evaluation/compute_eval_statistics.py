@@ -52,9 +52,8 @@ from pathlib import Path
 
 import numpy as np
 import yaml
-from scipy.stats import bootstrap
-
 from eval_returns_format import read_eval_meta, read_eval_returns
+from scipy.stats import bootstrap
 
 log = logging.getLogger("compute_eval_statistics")
 
@@ -72,12 +71,27 @@ DEFAULT_N_RESAMPLES = 1000  # scipy's default is 9999; 1000 suffices here
 # The 12 columns of the published inference_results schema, in its order, so
 # positional readers keep working. Provenance columns follow.
 REFERENCE_COLUMNS = [
-    "map_name", "algorithm", "checkpoint_dir_name", "WANDB_RUN_ID", "checkpoint_id",
-    "VMAPPED_SEED", "eval_seed", "mean", "std_err", "lower_ci", "upper_ci", "bst_std_err",
+    "map_name",
+    "algorithm",
+    "checkpoint_dir_name",
+    "WANDB_RUN_ID",
+    "checkpoint_id",
+    "VMAPPED_SEED",
+    "eval_seed",
+    "mean",
+    "std_err",
+    "lower_ci",
+    "upper_ci",
+    "bst_std_err",
 ]
 EXTRA_COLUMNS = [
-    "checkpoint_step", "num_episodes", "vmapped_seed_key", "sampled_seed",
-    "n_resamples", "bootstrap_seed", "source_file",
+    "checkpoint_step",
+    "num_episodes",
+    "vmapped_seed_key",
+    "sampled_seed",
+    "n_resamples",
+    "bootstrap_seed",
+    "source_file",
 ]
 COLUMNS = REFERENCE_COLUMNS + EXTRA_COLUMNS
 
@@ -89,8 +103,13 @@ PRUNED_DIRS = {"wandb", ".hydra"}
 # Identifies a row for --resume. Includes the variant and the eval seed because one
 # run can hold several evaluations of the same checkpoint: the one training wrote,
 # and a post-hoc pass per (algorithm variant, eval seed).
-KEY_COLUMNS = ("checkpoint_dir_name", "VMAPPED_SEED", "checkpoint_id",
-               "algorithm", "eval_seed")
+KEY_COLUMNS = (
+    "checkpoint_dir_name",
+    "VMAPPED_SEED",
+    "checkpoint_id",
+    "algorithm",
+    "eval_seed",
+)
 
 
 def episode_return_stats(returns, n_resamples=DEFAULT_N_RESAMPLES, rng=None):
@@ -134,8 +153,10 @@ def split_combined(combined_path, result_dir):
     for row in rows:
         groups.setdefault((row["map_name"], row["algorithm"]), []).append(row)
     for (map_name, algorithm), group in sorted(groups.items()):
-        write_csv(result_dir / map_name / algorithm /
-                  f"inference_results_{algorithm}.csv", group)
+        write_csv(
+            result_dir / map_name / algorithm / f"inference_results_{algorithm}.csv",
+            group,
+        )
     log.info(f"{len(rows)} rows across {len(groups)} (map, algorithm) pairs")
 
 
@@ -222,23 +243,36 @@ def discover_tasks(roots):
         for eval_dir in eval_dirs:
             meta = metas[eval_dir]
             for path, checkpoint_id, step in found[run_dir][eval_dir]:
-                tasks.append({
-                    "map_name": (config.get("ENV_KWARGS") or {}).get("map_name", "unknown"),
-                    "algorithm": meta["algorithm"] if meta else config.get("ALG_NAME", "unknown"),
-                    "checkpoint_dir_name": str(run_dir),
-                    "WANDB_RUN_ID": config.get("WANDB_RUN_ID", ""),
-                    "checkpoint_id": checkpoint_id,
-                    "VMAPPED_SEED": meta["vmapped_seed"] if meta else seed_index[eval_dir],
-                    # Training's eval draws come from the training RNG, so no fixed
-                    # eval seed exists and the column stays empty for those.
-                    "eval_seed": meta["eval_seed"] if meta else "",
-                    "checkpoint_step": step,
-                    "vmapped_seed_key": meta["vmapped_seed_key"] if meta else eval_dir.name,
-                    "sampled_seed": config.get("SEED", ""),
-                    "source_file": str(path),
-                    "wanted_episodes": meta["num_episodes"] if meta
-                                       else expected_episodes(config),
-                })
+                tasks.append(
+                    {
+                        "map_name": (config.get("ENV_KWARGS") or {}).get(
+                            "map_name", "unknown"
+                        ),
+                        "algorithm": (
+                            meta["algorithm"]
+                            if meta
+                            else config.get("ALG_NAME", "unknown")
+                        ),
+                        "checkpoint_dir_name": str(run_dir),
+                        "WANDB_RUN_ID": config.get("WANDB_RUN_ID", ""),
+                        "checkpoint_id": checkpoint_id,
+                        "VMAPPED_SEED": (
+                            meta["vmapped_seed"] if meta else seed_index[eval_dir]
+                        ),
+                        # Training's eval draws come from the training RNG, so no fixed
+                        # eval seed exists and the column stays empty for those.
+                        "eval_seed": meta["eval_seed"] if meta else "",
+                        "checkpoint_step": step,
+                        "vmapped_seed_key": (
+                            meta["vmapped_seed_key"] if meta else eval_dir.name
+                        ),
+                        "sampled_seed": config.get("SEED", ""),
+                        "source_file": str(path),
+                        "wanted_episodes": (
+                            meta["num_episodes"] if meta else expected_episodes(config)
+                        ),
+                    }
+                )
     return tasks
 
 
@@ -281,37 +315,68 @@ def process(task, n_resamples, bootstrap_seed):
         )
 
     row = {key: task[key] for key in COLUMNS if key in task}
-    row.update(stats, num_episodes=len(returns), n_resamples=n_resamples,
-               bootstrap_seed="" if bootstrap_seed is None else bootstrap_seed)
+    row.update(
+        stats,
+        num_episodes=len(returns),
+        n_resamples=n_resamples,
+        bootstrap_seed="" if bootstrap_seed is None else bootstrap_seed,
+    )
     return row, warnings
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     add = parser.add_argument
-    add("roots", nargs="*", type=Path, default=[DEFAULT_ROOT],
+    add(
+        "roots",
+        nargs="*",
+        type=Path,
+        default=[DEFAULT_ROOT],
         help=f"run directories, or anything above them (default: {DEFAULT_ROOT}/, "
-             "where hydra puts them)")
-    add("-o", "--output-dir", type=Path, default=DEFAULT_OUTPUT,
+        "where hydra puts them)",
+    )
+    add(
+        "-o",
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_OUTPUT,
         help=f"destination for inference_results.csv and the per-map/alg splits "
-             f"(default: {DEFAULT_OUTPUT}/)")
+        f"(default: {DEFAULT_OUTPUT}/)",
+    )
     add("--workers", type=int, default=1, help="worker processes (default: 1)")
-    add("--n-resamples", type=int, default=DEFAULT_N_RESAMPLES,
+    add(
+        "--n-resamples",
+        type=int,
+        default=DEFAULT_N_RESAMPLES,
         help=f"bootstrap resamples (default: {DEFAULT_N_RESAMPLES}; scipy's own "
-             "default is 9999)")
-    add("--bootstrap-seed", type=int, default=0,
-        help="seed for reproducible CI bounds; -1 leaves it unseeded (default: 0)")
-    add("--resume", action="store_true",
-        help="append to an existing inference_results.csv, skipping rows already in it")
-    add("--dry-run", action="store_true",
-        help="report what was discovered, compute nothing")
+        "default is 9999)",
+    )
+    add(
+        "--bootstrap-seed",
+        type=int,
+        default=0,
+        help="seed for reproducible CI bounds; -1 leaves it unseeded (default: 0)",
+    )
+    add(
+        "--resume",
+        action="store_true",
+        help="append to an existing inference_results.csv, skipping rows already in it",
+    )
+    add(
+        "--dry-run",
+        action="store_true",
+        help="report what was discovered, compute nothing",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
-    logging.basicConfig(level=logging.INFO, datefmt="%H:%M:%S",
-                        format="%(asctime)s %(levelname)-7s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO,
+        datefmt="%H:%M:%S",
+        format="%(asctime)s %(levelname)-7s %(message)s",
+    )
     bootstrap_seed = None if args.bootstrap_seed < 0 else args.bootstrap_seed
 
     tasks = discover_tasks(args.roots)
@@ -326,7 +391,11 @@ def main(argv=None):
 
     if args.dry_run:
         for cell in sorted(cells):
-            in_cell = [t for t in tasks if (t["checkpoint_dir_name"], t["VMAPPED_SEED"]) == cell]
+            in_cell = [
+                t
+                for t in tasks
+                if (t["checkpoint_dir_name"], t["VMAPPED_SEED"]) == cell
+            ]
             first = in_cell[0]
             log.info(
                 f"{first['map_name']:<14} {first['algorithm']:<10} "
@@ -341,10 +410,13 @@ def main(argv=None):
     append = args.resume and combined.is_file() and combined.stat().st_size > 0
     if append:
         with open(combined, newline="") as fh:
-            done = {tuple(row[key] for key in KEY_COLUMNS) for row in csv.DictReader(fh)}
+            done = {
+                tuple(row[key] for key in KEY_COLUMNS) for row in csv.DictReader(fh)
+            }
         before = len(tasks)
-        tasks = [t for t in tasks
-                 if tuple(str(t[key]) for key in KEY_COLUMNS) not in done]
+        tasks = [
+            t for t in tasks if tuple(str(t[key]) for key in KEY_COLUMNS) not in done
+        ]
         log.info(f"resuming: {before - len(tasks)} already in {combined}")
         if not tasks:
             split_combined(combined, args.output_dir)
@@ -369,14 +441,18 @@ def main(argv=None):
         written += 1
         if written % 100 == 0 or written == total:
             rate = written / max(time.time() - started, 1e-9)
-            log.info(f"{written}/{total} rows | {time.time() - started:.0f}s elapsed "
-                     f"| ~{(total - written) / rate:.0f}s left")
+            log.info(
+                f"{written}/{total} rows | {time.time() - started:.0f}s elapsed "
+                f"| ~{(total - written) / rate:.0f}s left"
+            )
 
     try:
         if args.workers > 1:
             with ProcessPoolExecutor(max_workers=args.workers) as pool:
-                futures = [pool.submit(process, t, args.n_resamples, bootstrap_seed)
-                           for t in tasks]
+                futures = [
+                    pool.submit(process, t, args.n_resamples, bootstrap_seed)
+                    for t in tasks
+                ]
                 for future in as_completed(futures):
                     consume(*future.result())
         else:
