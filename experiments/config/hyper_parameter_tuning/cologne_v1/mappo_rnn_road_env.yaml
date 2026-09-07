@@ -1,29 +1,29 @@
-"NUM_UPDATES": 1500
-"NUM_ENVS": 128
-"LR": 0.001
+"TOTAL_TIMESTEPS": 50_000_000
+"NUM_ENVS": 64
+"LR": 2.5e-4
 "UPDATE_EPOCHS": 4
-"NUM_MINIBATCHES": 4
+"NUM_MINIBATCHES": 2
 
 "REWARD_STANDARDIZATION": True
 "MAX_GRAD_NORM": 0.5
-"ENT_COEF": 0.0
-"NUM_STEPS": 128
+"ENT_COEF": 0.01
+"NUM_STEPS": 256
 "GAE_LAMBDA": 0.95
 "CLIP_EPS": 0.2
 "ACTIVATION": "relu" # hardcoded in the script
 "VF_COEF": 0.5
 
-"GRU_HIDDEN_DIM": 64
+"GRU_HIDDEN_DIM": 128
 # FC_DIM_SIZE: ~ # embedding size for the GRU, must be same as the GRU hidden size, will be set in the script
 "GAMMA": 0.99
-"ANNEAL_LR": True
+"ANNEAL_LR": False
 "SCALE_CLIP_EPS": False
 
 # ENV
 "ENV_NAME": "road_env"
 "ENV_KWARGS":
   "map_name": "Cologne-v1"
-  "encoding_type": "binary"     # can be binary, one-hot, sinusoidal or none
+  "encoding_type": "none"     # can be binary, one-hot, sinusoidal or none
   "include_extra_observations": 
     "segment_lengths": True     # Length of the segments
     "volumes": True             # Volumes of the vehicles on the segment normalized by the segment capacity
@@ -41,18 +41,24 @@
 
 # experiment params
 "NUM_SEEDS": 1 # number of vmapped seeds
-"SEED": 0
+"SEED": "random"
 
 "HYP_TUNE": False # perform hyp tune
 
-# WandB Params
-"WANDB_MODE": "online"
+# wandb params
 "ENTITY": "imp-act"
 "PROJECT": "jaxMARL"
-"WANDB_LOG_ALL_SEEDS": False # will log vmapped seeds separately
+"WANDB_MODE": "online"
+"WANDB_LOG_ALL_SEEDS": False # will log separately the vmapped seeds
 
-# where to save the params (if None, will not save)
-"SAVE_PATH": null
+# checkpointing
+"SAVE_CHECKPOINTS": True # save checkpoints
+"SAVE_CHECKPOINTS_INTERVAL": 0.01 # as a fraction of updates. Tip: set to same value or fraction of TEST_INTERVAL.
 
 # precision
 "DOUBLE_PRECISION_MODE": False # use double precision for the environment
+
+# hydra params
+hydra:
+  run:
+    dir: outputs/${ENV_KWARGS.map_name}/${ALG_NAME}/${now:%Y-%m-%d_%H-%M-%S.%f}

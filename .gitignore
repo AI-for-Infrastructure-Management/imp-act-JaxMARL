@@ -18,8 +18,15 @@ models/
 *.csv*
 !results.ipynb
 !Figure_8.ipynb
+!evaluation/hyperparameter_tuning_analysis.ipynb
+evaluation/data
 
-slurm_scripts/
+slurm_scripts/*
+# Keep the hyperparameter-tuning workflow scripts in version control
+# (see hyperparameter_tuning.md).
+!slurm_scripts/launch_hypers_sweep.sh
+!slurm_scripts/sample_random_search.py
+!slurm_scripts/wand_sync_hypers_sweep.sh
 *.out
 .venv/
 .venv

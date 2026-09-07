@@ -2,6 +2,7 @@
 """Wrappers for use with jaxmarl baselines."""
 
 import os
+import logging
 import jax
 import jax.numpy as jnp
 import chex
@@ -19,6 +20,8 @@ from jaxmarl.environments.multi_agent_env import MultiAgentEnv, State
 from safetensors.flax import save_file, load_file
 from flax.traverse_util import flatten_dict, unflatten_dict
 
+log = logging.getLogger(__name__)
+
 
 def save_params(params: Dict, filename: Union[str, os.PathLike]) -> None:
     flattened_dict = flatten_dict(params, sep=",")
@@ -28,6 +31,45 @@ def save_params(params: Dict, filename: Union[str, os.PathLike]) -> None:
 def load_params(filename: Union[str, os.PathLike]) -> Dict:
     flattened_dict = load_file(filename)
     return unflatten_dict(flattened_dict, sep=",")
+
+
+def resolve_episode_horizon(config: Dict, env) -> int:
+    """Fixed episode length; eval envs finish episodes in lockstep, so raw
+    returns can be sliced out instead of masked."""
+    episode_horizon = env.env.max_timesteps
+    if config.get("STORE_EVAL_RETURNS", False):
+        assert config["TEST_NUM_STEPS"] % episode_horizon == 0, (
+            f"STORE_EVAL_RETURNS requires TEST_NUM_STEPS ({config['TEST_NUM_STEPS']}) "
+            f"to be a multiple of the episode horizon ({episode_horizon})"
+        )
+    return episode_horizon
+
+
+def make_store_eval_returns(config: Dict):
+    """Callback that dumps raw eval returns to checkpoints/<seed>/eval_returns_<step>.csv."""
+
+    def store_eval_returns(vmapped_seed, raw_returns, step):
+        save_dir = os.path.join(
+            config["HYDRA_PATH"], "checkpoints", str(vmapped_seed)
+        )
+        os.makedirs(save_dir, exist_ok=True)
+
+        update_step_length = int(np.ceil(np.log10(config["NUM_UPDATES"])))
+
+        save_path = os.path.join(
+            save_dir, f"eval_returns_{step:0{update_step_length}}.csv"
+        )
+
+        log.info(f"Saving eval returns {save_path}")
+        np.savetxt(
+            save_path,
+            np.asarray(raw_returns),
+            delimiter=",",
+            header="episode_return",
+            comments="",
+        )
+
+    return store_eval_returns
 
 
 class JaxMARLWrapper(object):

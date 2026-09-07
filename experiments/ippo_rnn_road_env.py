@@ -1,6 +1,6 @@
 """
-This file was adapted from the original in the process of creating the 
-imp-act adaption of JaxMARL under the 
+This file was adapted from the original in the process of creating the
+imp-act adaption of JaxMARL under the
 [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
 
 Original file: baselines/IPPO/ippo_rnn_smax.py
@@ -28,7 +28,12 @@ import hydra
 from omegaconf import OmegaConf
 
 import jaxmarl
-from jaxmarl.wrappers.baselines import LogWrapper, save_params
+from jaxmarl.wrappers.baselines import (
+    LogWrapper,
+    save_params,
+    resolve_episode_horizon,
+    make_store_eval_returns,
+)
 
 # Get Hydra's logger
 log = logging.getLogger(__name__)
@@ -185,9 +190,23 @@ def make_train(config):
     env = LogWrapper(env)
 
     config["NUM_ACTORS"] = env.num_agents * config["NUM_ENVS"]
-    config["TOTAL_TIMESTEPS"] = (
-        config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
+    config["NUM_UPDATES"] = (
+        config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     )
+    config["NUM_EVALS"] = int(1 / config["TEST_INTERVAL"])
+    config["EVAL_UPDATES"] = jnp.asarray(
+        np.linspace(0, config["NUM_UPDATES"] - 1, config["NUM_EVALS"], dtype=int)
+    )
+
+    episode_horizon = resolve_episode_horizon(config, env)
+
+    if config.get("SAVE_CHECKPOINTS", False):
+        config["NUM_CHECKPOINTS"] = int(1 / config["SAVE_CHECKPOINTS_INTERVAL"])
+        config["CHECKPOINT_UPDATES"] = jnp.asarray(
+            np.linspace(
+                0, config["NUM_UPDATES"] - 1, config["NUM_CHECKPOINTS"], dtype=int
+            )
+        )
     config["MINIBATCH_SIZE"] = (
         config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     )
@@ -249,7 +268,9 @@ def make_train(config):
         # TRAIN LOOP
         def _update_step(update_runner_state, unused):
             # COLLECT TRAJECTORIES
-            runner_state, update_steps, metrics_manager = update_runner_state
+            runner_state, update_steps, eval_raw_returns, metrics_manager = (
+                update_runner_state
+            )
 
             def _env_step(runner_state, unused):
                 (
@@ -533,23 +554,20 @@ def make_train(config):
                 rng, _rng = jax.random.split(rng)
 
                 def eval_and_store_returns(rng, train_state):
-                    eval_metrics = get_greedy_metrics(rng, train_state)
-                    idx = update_steps // int(
-                        config["NUM_UPDATES"] * config["TEST_INTERVAL"]
-                    )
+                    eval_metrics, raw_returns = get_greedy_metrics(rng, train_state)
+                    idx = jnp.argmax(update_steps == config["EVAL_UPDATES"])
                     _metrics_manager = EvalMetricsManager(
                         logged_eval_metrics=eval_metrics,
                         eval_returns=metrics_manager.eval_returns.at[idx].set(
                             eval_metrics["returned_episode_returns"]
                         ),
                     )
-                    return _metrics_manager
+                    return _metrics_manager, raw_returns
 
-                metrics_manager = jax.lax.cond(
-                    update_steps % int(config["NUM_UPDATES"] * config["TEST_INTERVAL"])
-                    == 0,
+                metrics_manager, eval_raw_returns = jax.lax.cond(
+                    jnp.any(update_steps == config["EVAL_UPDATES"]),
                     lambda _: eval_and_store_returns(_rng, train_state),
-                    lambda _: metrics_manager,
+                    lambda _: (metrics_manager, eval_raw_returns),
                     operand=None,
                 )
                 metrics.update(
@@ -559,13 +577,23 @@ def make_train(config):
                     }
                 )
 
+                # STORE RAW EVAL RETURNS
+                if config.get("STORE_EVAL_RETURNS", False):
+                    jax.lax.cond(
+                        jnp.any(update_steps == config["EVAL_UPDATES"]),
+                        lambda: jax.debug.callback(
+                            store_eval_returns,
+                            original_seed,
+                            eval_raw_returns,
+                            update_steps,
+                        ),
+                        lambda: None,
+                    )
+
             # CHECKPOINTING
             if config.get("SAVE_CHECKPOINTS", False):
-
                 jax.lax.cond(
-                    update_steps
-                    % int(config["NUM_UPDATES"] * config["SAVE_CHECKPOINTS_INTERVAL"])
-                    == 0,
+                    jnp.any(update_steps == config["CHECKPOINT_UPDATES"]),
                     lambda _: jax.debug.callback(
                         checkpoint_model,
                         original_seed,
@@ -590,7 +618,9 @@ def make_train(config):
                         )
                     metrics_conversion = {k: float(v) for k, v in metrics.items()}
                     try:
-                        metrics_conversion["gpu_stats"] = jax.devices()[0].memory_stats()
+                        metrics_conversion["gpu_stats"] = jax.devices()[
+                            0
+                        ].memory_stats()
                     except IndexError:
                         pass
                     wandb.log(metrics_conversion, step=metrics["update_steps"])
@@ -607,12 +637,17 @@ def make_train(config):
                 rnorm,
                 rng,
             )
-            return (runner_state, update_steps, metrics_manager), metrics
+            return (
+                runner_state,
+                update_steps,
+                eval_raw_returns,
+                metrics_manager,
+            ), metrics
 
         def get_greedy_metrics(rng, train_state):
             """Help function to test greedy policy during training"""
             if not config.get("TEST_DURING_TRAINING", True):
-                return None
+                return None, None
 
             config["TEST_NUM_ACTORS"] = config["TEST_NUM_ENVS"] * env.num_agents
 
@@ -674,7 +709,18 @@ def make_train(config):
                 ),
                 infos,
             )
-            return metrics
+
+            # One agent's return per episode (agents share the reward). Envs
+            # finish episodes in lockstep, so we slice at those boundaries
+            # instead of masking. infos is flattened over (env, agent), so
+            # agent 0 is every num_agents-th entry.
+            raw_returns = infos["returned_episode_returns"][
+                episode_horizon - 1 :: episode_horizon, :: env.num_agents
+            ].reshape(-1)
+
+            return metrics, raw_returns
+
+        store_eval_returns = make_store_eval_returns(config)
 
         def checkpoint_model(vmapped_seed, train_state, step, rnorm):
             save_dir = os.path.join(
@@ -709,10 +755,10 @@ def make_train(config):
         rng, _rng = jax.random.split(rng)
 
         # Metrics Manager
-        num_evals = int(1 / config["TEST_INTERVAL"])
+        logged_eval_metrics, eval_raw_returns = get_greedy_metrics(_rng, train_state)
         metrics_manager = EvalMetricsManager(
-            logged_eval_metrics=get_greedy_metrics(_rng, train_state),
-            eval_returns=jnp.zeros((num_evals,), device="cpu"),
+            logged_eval_metrics=logged_eval_metrics,
+            eval_returns=jnp.zeros((config["NUM_EVALS"],), device="cpu"),
         )
 
         # train
@@ -728,7 +774,7 @@ def make_train(config):
         )
         runner_state, metrics = jax.lax.scan(
             _update_step,
-            (runner_state, 0, metrics_manager),
+            (runner_state, 0, eval_raw_returns, metrics_manager),
             None,
             config["NUM_UPDATES"],
         )
@@ -764,9 +810,6 @@ def single_run(config):
 
     # embedding size for the GRU, must be same as the GRU hidden size
     config["FC_DIM_SIZE"] = config["GRU_HIDDEN_DIM"]
-    config["TOTAL_TIMESTEPS"] = (
-        config["NUM_ENVS"] * config["NUM_STEPS"] * config["NUM_UPDATES"]
-    )
 
     if config["SEED"] == "random":
         config["SEED"] = np.random.randint(0, 2**32 - 1)
