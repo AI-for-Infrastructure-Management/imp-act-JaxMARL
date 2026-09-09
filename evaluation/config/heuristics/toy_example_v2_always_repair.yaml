@@ -1,0 +1,14 @@
+map: ToyExample-v2
+policy: always_repair
+num_envs: 10000
+num_steps: 50
+norm_constant: 1e6
+plot_histogram: False
+double_precision_mode: False
+policy_parameters:
+  prioritization_enabled: False
+
+# hydra params
+hydra:
+  run:
+    dir: outputs/${map}/always_repair/eval/${now:%Y-%m-%d_%H-%M-%S.%f}
