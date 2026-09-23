@@ -26,7 +26,7 @@
 # ENV
 "ENV_NAME": "road_env"
 "ENV_KWARGS":
-  "map_name": "ToyExample-v2"
+  "map_name": "Cologne-v1"
   "encoding_type": "none"       # can be binary, one-hot, sinusoidal or none
   "include_extra_observations": 
     "segment_lengths": True     # Length of the segments
@@ -53,7 +53,7 @@
 # WandB Params
 "WANDB_MODE": "online"
 "ENTITY": "imp-act"
-"PROJECT": "jaxMARL-ippo"
+"PROJECT": "imp-act-jaxMARL-final-runs"
 "WANDB_LOG_ALL_SEEDS": False # will log vmapped seeds separately
 
 # model checkpointing (will be saved in hydra dir)
