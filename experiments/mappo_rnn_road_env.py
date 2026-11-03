@@ -372,8 +372,10 @@ def make_train(config):
         ac_init_hstate = ScannedRNN.initialize_carry(
             config["NUM_ACTORS"], config["GRU_HIDDEN_DIM"]
         )
+        # One critic state per env: every agent of an env sees the same world
+        # state (no agent id) and the same dones, so their values are identical
         cr_init_hstate = ScannedRNN.initialize_carry(
-            config["NUM_ACTORS"], config["GRU_HIDDEN_DIM"]
+            config["NUM_ENVS"], config["GRU_HIDDEN_DIM"]
         )
 
         # TRAIN LOOP
@@ -408,16 +410,16 @@ def make_train(config):
                 )
                 env_act = {k: v.squeeze() for k, v in env_act.items()}
 
-                # VALUE
-                world_state = env.broadcast_env_data(last_obs["world_state"])
-
+                # VALUE: one critic pass per env, broadcast to its agents
+                # (actors are agent-major, so env e's agents share last_done[e])
                 cr_in = (
-                    world_state[None, :],
-                    last_done[np.newaxis, :],
+                    last_obs["world_state"][None, :],
+                    last_done[np.newaxis, : config["NUM_ENVS"]],
                 )
-                cr_hstate, value = critic_network.apply(
+                cr_hstate, env_value = critic_network.apply(
                     train_states[1].params, hstates[1], cr_in
                 )
+                value = env.broadcast_env_data(env_value[0])[None, :]
 
                 # STEP ENV
                 rng, _rng = jax.random.split(rng)
@@ -476,16 +478,14 @@ def make_train(config):
                 rng,
             ) = runner_state
 
-            last_world_state = env.broadcast_env_data(last_obs["world_state"])
-
             cr_in = (
-                last_world_state[None, :],
-                last_done[np.newaxis, :],
+                last_obs["world_state"][None, :],
+                last_done[np.newaxis, : config["NUM_ENVS"]],
             )
             _, last_val = critic_network.apply(
                 train_states[1].params, hstates[1], cr_in
             )
-            last_val = last_val.squeeze()
+            last_val = env.broadcast_env_data(last_val[0])
 
             def _calculate_gae(traj_batch, last_val):
                 def _get_advantages(gae_and_next_value, transition):
@@ -519,12 +519,14 @@ def make_train(config):
                     actor_train_state, critic_train_state = train_states
                     env_indices = actor_indices % config["NUM_ENVS"]
                     take_actor = lambda x: jnp.take(x, actor_indices, axis=1)
-                    take_env = lambda x: jnp.take(x, env_indices, axis=1)
                     ac_init_hstate = jnp.take(init_hstates[0], actor_indices, axis=1)
-                    cr_init_hstate = jnp.take(init_hstates[1], actor_indices, axis=1)
+                    # The critic runs on every env once; each sampled actor then
+                    # reads its env's value (no per-actor copies of the world state)
+                    cr_init_hstate = init_hstates[1]
+                    env_done = traj_batch.actor.done[:, : config["NUM_ENVS"]]
                     traj_batch_mb = Transition(
                         actor=jax.tree.map(take_actor, traj_batch.actor),
-                        env=jax.tree.map(take_env, traj_batch.env),
+                        env=traj_batch.env,
                     )
                     advantages_mb = take_actor(advantages)
                     targets_mb = take_actor(targets)
@@ -572,12 +574,13 @@ def make_train(config):
                     def _critic_loss_fn(
                         critic_params, init_hstate, traj_batch, targets
                     ):
-                        # RERUN NETWORK
-                        _, value = critic_network.apply(
+                        # RERUN NETWORK (per env), then each actor's env value
+                        _, env_value = critic_network.apply(
                             critic_params,
-                            init_hstate.squeeze(),
-                            (traj_batch.env.world_state, traj_batch.actor.done),
+                            init_hstate.squeeze(0),
+                            (traj_batch.env.world_state, env_done),
                         )
+                        value = jnp.take(env_value, env_indices, axis=1)
 
                         # CALCULATE VALUE LOSS
                         value_pred_clipped = traj_batch.actor.value + (
@@ -636,8 +639,9 @@ def make_train(config):
                 ) = update_state
                 rng, _rng = jax.random.split(rng)
 
+                # (1, NUM_ACTORS, H) for the actor, (1, NUM_ENVS, H) for the critic
                 init_hstates = jax.tree.map(
-                    lambda x: jnp.reshape(x, (1, config["NUM_ACTORS"], -1)),
+                    lambda x: jnp.reshape(x, (1, x.shape[-2], -1)),
                     init_hstates,
                 )
 
