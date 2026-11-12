@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from create_figures import VDN_CBD_ORDER, iter_vdn_runs
+
 # Configuration
 DATA_DIR = "evaluation/plotting/data"
 TABLES_DIR = "evaluation/plotting/tables"
@@ -240,11 +242,16 @@ def generate_latex_table(
     print(f"Table saved to {output_path}")
 
 
+# Extra algorithms: shown in the main results table with an asterisk, but not considered
+# when marking the best result and the results tied with it
+EXTRA_ALGORITHMS = {"vdn_ba_rnn"}
+
+
 def best_model_stats(data, baseline_heuristic_values, heuristic_results, env):
     """
     Best checkpoint across all seeds per algorithm on env, as % vs H_PS, with that checkpoint's
     own 95% CI. H_PS is best if no algorithm beats it; results whose CI overlaps the best
-    one's are marked tied.
+    one's are marked tied. EXTRA_ALGORITHMS are never best or tied.
     """
     h = heuristic_results[env]["segment_based_heuristic"]
     h_mean = baseline_heuristic_values[env]
@@ -261,7 +268,10 @@ def best_model_stats(data, baseline_heuristic_values, heuristic_results, env):
             "ci": (to_pct(best["lower_ci"]), to_pct(best["upper_ci"])),
         }
 
-    best_alg = max(alg_stats, key=lambda a: alg_stats[a]["mean"])
+    best_alg = max(
+        (a for a in alg_stats if a not in EXTRA_ALGORITHMS),
+        key=lambda a: alg_stats[a]["mean"],
+    )
     heuristic_wins = alg_stats[best_alg]["mean"] <= 0
     h_stats = {
         "mean": h_mean,
@@ -272,7 +282,10 @@ def best_model_stats(data, baseline_heuristic_values, heuristic_results, env):
     for alg, s in alg_stats.items():
         s["is_best"] = not heuristic_wins and alg == best_alg
         s["tied"] = (
-            not s["is_best"] and s["ci"][0] <= ref_ci[1] and ref_ci[0] <= s["ci"][1]
+            not s["is_best"]
+            and alg not in EXTRA_ALGORITHMS
+            and s["ci"][0] <= ref_ci[1]
+            and ref_ci[0] <= s["ci"][1]
         )
     return alg_stats, h_stats
 
@@ -295,163 +308,29 @@ def format_alg_mean(alg_stats, alg):
 
 
 def format_heuristic_mean(h_stats):
-    val = h_stats["mean"]
-    mean_str = (
-        f"{val/1e9:.2f}\\text{{B}}" if abs(val) >= 1e9 else f"{val/1e6:.2f}\\text{{M}}"
-    )
+    """H_PS is the reference, so 0% on the same scale as the algorithms; bold if best."""
+    mean_str = r"0.00\%"
     if h_stats["is_best"]:
         mean_str = r"\textbf{" + mean_str + "}"
     return mean_str
 
 
-def generate_latex_table_combined(
+def generate_latex_table_scenarios(
     data,
     baseline_heuristic_values,
-    blocks=None,
-    output_filename="best_results_main.tex",
-    caption=None,
-    label=None,
-):
-    """
-    Generates LaTeX table comparing scenarios side by side per environment block
-    (by default Constrained vs Unconstrained for the three base environments).
-
-    blocks: list of (display name, envs, column labels), one column group per env. With column
-    labels, a block whose labels differ from the previous block's gets its own header row.
-    With a caption, the tabular is wrapped in a full-width table* scaled to 0.85\\textwidth.
-
-    Each algorithm's value is its best checkpoint across all seeds, with that checkpoint's
-    own 95% CI over evaluation episodes.
-    H_PS gets its own row and competes for best (bold); results whose CI overlaps the
-    best one's are underlined.
-    """
-    if blocks is None:
-        env_display_names = {
-            **ENV_DISPLAY_NAMES,
-            "ToyExample-v2": r"\textbf{ToyExample}",
-        }
-        blocks = [
-            (env_display_names[env], (env, f"{env}-unconstrained"), None)
-            for env in ["ToyExample-v2", "Cologne-v1", "CologneBonnDusseldorf-v1"]
-        ]
-    num_groups = len(blocks[0][1])
-    last_col = 2 + 2 * num_groups
-    main_algorithms = ["vdn_rnn", "qmix_rnn", "pqn_rnn", "mappo_rnn", "ippo_rnn"]
-    baseline_alg = "vdn_ba_rnn"
-
-    with open(HEURISTIC_RESULTS_FILE) as f:
-        heuristic_results = yaml.load(f, Loader=yaml.FullLoader)
-
-    def env_stats(env):
-        return best_model_stats(data, baseline_heuristic_values, heuristic_results, env)
-
-    def alg_cells(alg_stats, alg):
-        return format_alg_mean(alg_stats, alg), (
-            format_ci(alg_stats[alg]) if alg in alg_stats else "--"
-        )
-
-    def heuristic_cells(h_stats):
-        return format_heuristic_mean(h_stats), format_ci(h_stats)
-
-    latex_lines = []
-    latex_lines.append(r"  \begin{tabular}{ll" + "rc" * num_groups + "}")
-    latex_lines.append(r"    \toprule")
-
-    def group_header(labels):
-        return [
-            r"    & & "
-            + " & ".join(r"\multicolumn{2}{c}{\textbf{" + lbl + r"}}" for lbl in labels)
-            + r" \\",
-            "    "
-            + " ".join(
-                f"\\cmidrule(lr){{{3 + 2 * g}-{4 + 2 * g}}}" for g in range(num_groups)
-            ),
-        ]
-
-    # A block's own labels override the default; each change of labels gets a header row
-    prev_labels = blocks[0][2] or ("Constrained", "Unconstrained")
-    latex_lines += group_header(prev_labels)
-    latex_lines.append(r"    \thead{\textbf{Environment}} & \thead{\textbf{Algorithm}}")
-    for g in range(num_groups):
-        latex_lines.append(r"    & \thead{\textbf{${\Delta \bar{R}^{\pi}_0}$}} ")
-        latex_lines.append(
-            r"    & \thead{\textbf{95\% CI}}" + (r" \\" if g == num_groups - 1 else " ")
-        )
-    latex_lines.append(r"    \midrule")
-
-    for k, (display_name, envs, labels) in enumerate(blocks):
-        env_results = [env_stats(env) for env in envs]
-
-        if labels is not None and labels != prev_labels:
-            latex_lines += group_header(labels)
-            prev_labels = labels
-        latex_lines.append(r"    \multirow{7}{*}{{\shortstack{" + display_name + r"}}}")
-
-        # Heuristic row
-        cells = [
-            cell for _, h_stats in env_results for cell in heuristic_cells(h_stats)
-        ]
-        latex_lines.append(
-            r"    & $\text{H}_\text{PS}$ & " + " & ".join(cells) + r" \\"
-        )
-        latex_lines.append(f"    \\cmidrule(lr){{2-{last_col}}}")
-
-        # Main algorithms, then the baseline algorithm below its own separator
-        for alg in main_algorithms + [baseline_alg]:
-            if alg == baseline_alg:
-                latex_lines.append(f"    \\cmidrule(lr){{2-{last_col}}}")
-            cells = [
-                cell
-                for alg_stats, _ in env_results
-                for cell in alg_cells(alg_stats, alg)
-            ]
-            latex_lines.append(
-                f"    & {ALGORITHM_NAMES[alg]} & " + " & ".join(cells) + r" \\"
-            )
-
-        if k != len(blocks) - 1:
-            latex_lines.append(r"    \midrule")
-            latex_lines.append(r"    \addlinespace[4pt]")
-        else:
-            latex_lines.append(r"    \bottomrule")
-
-    latex_lines.append(r"  \end{tabular}")
-
-    if caption is not None:
-        # Full-width table as in the paper's main results
-        latex_lines = [
-            r"\begin{table*}[!t]",
-            r"   \caption{" + caption + "}",
-            *([r"  \label{" + label + "}"] if label else []),
-            r"  \centering",
-            r"  \renewcommand{\arraystretch}{1.15}",
-            r"  \resizebox{0.85\textwidth}{!}{%",
-            *latex_lines,
-            r"  }%",
-            r"\end{table*}",
-        ]
-
-    os.makedirs(TABLES_DIR, exist_ok=True)
-    output_path = os.path.join(TABLES_DIR, output_filename)
-    with open(output_path, "w") as f:
-        f.write("\n".join(latex_lines))
-    print(f"Combined table saved to {output_path}")
-
-
-def generate_latex_table_budgets(
-    data,
-    baseline_heuristic_values,
-    display_name,
-    envs,
-    env_labels,
+    blocks,
     output_filename,
+    scenario_header="Scenario",
     caption=None,
     label=None,
+    placement="h",
 ):
     """
-    Generates LaTeX table of the best model per algorithm across scenarios of one environment,
-    with algorithms in columns (like the per-seed table) and one value row plus one CI row
-    per scenario. Values and marking as in best_model_stats.
+    Generates LaTeX table of the best model per algorithm, with algorithms in columns (like the
+    per-seed table) and one value row plus one CI row per scenario. Values and marking as in
+    best_model_stats.
+
+    blocks: list of (display name, [(env, scenario label), ...]), one Environment cell per block.
     """
     algorithms = [
         "vdn_ba_rnn",
@@ -472,62 +351,80 @@ def generate_latex_table_budgets(
     )
     latex_lines.append(r"    \toprule")
     latex_lines.append(
-        r"    \thead{\textbf{Environment}} & \thead{\textbf{Budget}} & \thead{\textbf{$\text{H}_\text{PS}$}} & "
+        r"    \thead{\textbf{Environment}} & \thead{\textbf{"
+        + scenario_header
+        + r"}} & \thead{\textbf{$\text{H}_\text{PS}$}} & "
         + " & ".join(
-            r"\thead{\textbf{" + ALGORITHM_NAMES[alg] + "}}" for alg in algorithms
+            r"\thead{\textbf{"
+            + ALGORITHM_NAMES[alg]
+            + ("$^*$" if alg in EXTRA_ALGORITHMS else "")
+            + "}}"
+            for alg in algorithms
         )
         + r" \\"
     )
     latex_lines.append(r"    \midrule")
-    latex_lines.append(
-        r"    \multirow{"
-        + str(2 * len(envs))
-        + r"}{*}{{\shortstack[c]{"
-        + display_name
-        + r"}}}"
-    )
 
-    for i, (env, env_label) in enumerate(zip(envs, env_labels, strict=True)):
-        alg_stats, h_stats = best_model_stats(
-            data, baseline_heuristic_values, heuristic_results, env
-        )
-        # Value row, then its 95% CI row
-        latex_lines.append(f"    % {env}")
+    for k, (display_name, rows) in enumerate(blocks):
         latex_lines.append(
-            r"    & \multirow{2}{*}{"
-            + env_label
-            + "} & "
-            + format_heuristic_mean(h_stats)
-            + " & "
-            + " & ".join(format_alg_mean(alg_stats, alg) for alg in algorithms)
-            + r" \\"
+            r"    \multirow{"
+            + str(2 * len(rows))
+            + r"}{*}{{\shortstack[c]{"
+            + display_name
+            + r"}}}"
         )
-        latex_lines.append(
-            r"    & & "
-            + format_ci(h_stats)
-            + " & "
-            + " & ".join(
-                format_ci(alg_stats[alg]) if alg in alg_stats else "--"
-                for alg in algorithms
+        for i, (env, env_label) in enumerate(rows):
+            alg_stats, h_stats = best_model_stats(
+                data, baseline_heuristic_values, heuristic_results, env
             )
-            + r" \\"
-        )
-        # Rule and gap between scenarios, as between blocks in the per-seed table
-        if i != len(envs) - 1:
-            latex_lines.append(f"    \\cmidrule(lr){{2-{last_col}}}")
-            latex_lines.append(r"    \addlinespace[4pt]")
+            # Value row, then its 95% CI row; H_PS's absolute return goes under the scenario
+            # label, in the CI row so both rows keep the same height
+            latex_lines.append(f"    % {env}")
+            latex_lines.append(
+                r"    & "
+                + env_label
+                + " & "
+                + format_heuristic_mean(h_stats)
+                + " & "
+                + " & ".join(format_alg_mean(alg_stats, alg) for alg in algorithms)
+                + r" \\"
+            )
+            latex_lines.append(
+                r"    & {\footnotesize\color{gray} $\text{H}_\text{PS}$: $"
+                + format_heuristic_value(h_stats["mean"])
+                + "$} & "
+                + format_ci(h_stats)
+                + " & "
+                + " & ".join(
+                    format_ci(alg_stats[alg]) if alg in alg_stats else "--"
+                    for alg in algorithms
+                )
+                + r" \\"
+            )
+            # Rule between scenarios, with the same gap above and below
+            if i != len(rows) - 1:
+                latex_lines.append(r"    \addlinespace[2pt]")
+                latex_lines.append(f"    \\cmidrule(lr){{2-{last_col}}}")
+                latex_lines.append(r"    \addlinespace[2pt]")
+
+        if k != len(blocks) - 1:
+            latex_lines.append(r"    \addlinespace[2pt]")
+            latex_lines.append(r"    \midrule")
+            latex_lines.append(r"    \addlinespace[2pt]")
 
     latex_lines.append(r"    \bottomrule")
     latex_lines.append(r"  \end{tabular}")
 
     if caption is not None:
-        latex_lines = wrap_table(latex_lines, caption, label, "h", arraystretch=1.2)
+        latex_lines = wrap_table(
+            latex_lines, caption, label, placement, arraystretch=1.15
+        )
 
     os.makedirs(TABLES_DIR, exist_ok=True)
     output_path = os.path.join(TABLES_DIR, output_filename)
     with open(output_path, "w") as f:
         f.write("\n".join(latex_lines))
-    print(f"Budget table saved to {output_path}")
+    print(f"Table saved to {output_path}")
 
 
 def get_per_seed_results(data, env_name, baseline_heuristic_values):
@@ -605,6 +502,10 @@ def generate_latex_table_per_seed(
     n_left, n_right = len(side_algorithms[0]), len(side_algorithms[1])
     last_col = 2 + n_left + n_right
 
+    def num_seeds_of(env):
+        # Not from the first column's algorithm, which may have no runs on env (VDN_BA)
+        return max(len(seeds) for seeds in per_seed_results_all[env].values())
+
     def alg_headers(algs):
         return " & ".join(
             r"\thead{\textbf{" + ALGORITHM_NAMES[alg] + "}}" for alg in algs
@@ -651,8 +552,9 @@ def generate_latex_table_per_seed(
             prev_labels = labels
 
         sides = [per_seed_results_all[left_env], per_seed_results_all[right_env]]
-        num_seeds = len(sides[0][side_algorithms[0][0]])
-        # H_PS value with its 95% CI, the CI in % relative to its mean (as in the main table)
+        num_seeds = num_seeds_of(left_env)
+        # H_PS as the 0 reference with its 95% CI, both in % relative to its mean, and its
+        # absolute return in grey (as in the main table)
         h_strs = []
         for env in (left_env, right_env):
             h_mean = baseline_heuristic_values[env]
@@ -662,7 +564,8 @@ def generate_latex_table_per_seed(
                 for v in (h["lower_95ci"], h["upper_95ci"])
             )
             h_strs.append(
-                f"${format_heuristic_value(h_mean)}$ \\; {{[{lo:.2f}\\,, {hi:.2f}]}}"
+                f"0.00\\% \\; {{[{lo:.2f}\\,, {hi:.2f}]}} \\quad "
+                f"{{\\footnotesize\\color{{gray}} ${format_heuristic_value(h_mean)}$}}"
             )
 
         same_as_prev = k > 0 and blocks[k - 1][0] == display_name
@@ -674,9 +577,7 @@ def generate_latex_table_per_seed(
         if not same_as_prev:
             span, j = 0, k
             while j < len(blocks) and blocks[j][0] == display_name:
-                span += (
-                    len(per_seed_results_all[blocks[j][1]][side_algorithms[0][0]]) + 2
-                )
+                span += num_seeds_of(blocks[j][1]) + 2
                 if j > k and blocks[j][3] != blocks[j - 1][3]:
                     span += 1
                 j += 1
@@ -725,19 +626,22 @@ def generate_latex_table_per_seed(
                     iqr_cells.append("--")
         latex_lines.append(r"    & \textbf{IQR} & " + " & ".join(iqr_cells) + r" \\")
 
+        # Rule between blocks with the same gap above and below, as in the main table
         if same_as_next:
+            latex_lines.append(r"    \addlinespace[2pt]")
             latex_lines.append(f"    \\cmidrule(lr){{2-{last_col}}}")
-            latex_lines.append(r"    \addlinespace[4pt]")
+            latex_lines.append(r"    \addlinespace[2pt]")
         elif k != len(blocks) - 1:
+            latex_lines.append(r"    \addlinespace[2pt]")
             latex_lines.append(r"    \midrule")
-            latex_lines.append(r"    \addlinespace[4pt]")
+            latex_lines.append(r"    \addlinespace[2pt]")
         else:
             latex_lines.append(r"    \bottomrule")
 
     latex_lines.append(r"  \end{tabular}")
 
     if caption is not None:
-        latex_lines = wrap_table(latex_lines, caption, label, "h", arraystretch=1.2)
+        latex_lines = wrap_table(latex_lines, caption, label, "h", arraystretch=1.15)
 
     os.makedirs(TABLES_DIR, exist_ok=True)
     output_path = os.path.join(TABLES_DIR, output_filename)
@@ -889,8 +793,70 @@ def generate_heuristic_parameters_table(
     print(f"Heuristic parameters table saved to {output_path}")
 
 
+def format_lr_latex(lr):
+    mantissa, exponent = f"{lr:.0e}".split("e")
+    power = f"10^{{{int(exponent)}}}"
+    return f"${power}$" if mantissa == "1" else f"${mantissa}\\times{power}$"
+
+
+def generate_vdn_cbd_configs_table(
+    env="CologneBonnDusseldorf-v1-unconstrained",
+    output_filename="vdn_cbd_unconstrained_configs.tex",
+):
+    """Hyperparameters of the VDN configurations in the unconstrained CologneBonnDusseldorf
+    appendix figure, read from the run configs. Only a tabular: the appendix sets it next to
+    the figure with \\captionof. "--" marks a value equal to rank 1 (bold)."""
+    columns = {
+        r"\thead{LR}": lambda c: format_lr_latex(c["LR"]),
+        r"\thead{Hidden\\size}": lambda c: str(c["HIDDEN_SIZE"]),
+        r"\thead{Target\\update}": lambda c: str(c["TARGET_UPDATE_INTERVAL"]),
+        # Environment steps over which epsilon decays
+        r"\thead{Exploration\\steps}": lambda c: f"{c['EPS_DECAY'] * c['TOTAL_TIMESTEPS'] / 1e6:g}M",
+        r"\thead{Steps}": lambda c: f"{c['TOTAL_TIMESTEPS'] / 1e6:g}M",
+    }
+    configs = {}
+    for label, cfg, _ in iter_vdn_runs(env):
+        values = [fmt(cfg) for fmt in columns.values()]
+        if configs.setdefault(label, values) != values:
+            raise ValueError(f"Seeds of {label} on {env} differ in hyperparameters")
+    reference = configs["Rank 1"]
+
+    latex_lines = [
+        r"\begin{tabular}{l" + "c" * len(columns) + "}",
+        r"    \toprule",
+        r"    \thead{Configuration} & " + " & ".join(columns) + r" \\",
+        r"    \midrule",
+    ]
+    for label in VDN_CBD_ORDER:
+        if label not in configs:
+            continue
+        if label == "Rank 1":
+            cells = [r"\textbf{Rank 1}"] + [
+                r"$\mathbf{" + v.strip("$") + "}$" if v.startswith("$") else r"\textbf{" + v + "}"
+                for v in reference
+            ]
+        else:
+            # Single changes start a new block after the next-best ranks
+            if label == "LR only":
+                latex_lines.append(r"    \midrule")
+            cells = [label] + [
+                "--" if v == ref else v for v, ref in zip(configs[label], reference)
+            ]
+        latex_lines.append("    " + " & ".join(cells) + r" \\")
+    latex_lines += [r"    \bottomrule", r"\end{tabular}"]
+
+    os.makedirs(TABLES_DIR, exist_ok=True)
+    output_path = os.path.join(TABLES_DIR, output_filename)
+    with open(output_path, "w") as f:
+        f.write("\n".join(latex_lines) + "\n")
+    print(f"VDN configurations table saved to {output_path}")
+
+
 def main():
     data, baseline_heuristic_values = load_data()
+
+    # Appendix: VDN hyperparameter sensitivity, next to Figure_VDN_CBD_Unconstrained
+    generate_vdn_cbd_configs_table()
 
     environments = data["map_name"].unique()
     best_checkpoints_all = {
@@ -903,57 +869,89 @@ def main():
     # Original table
     generate_latex_table(best_checkpoints_all, baseline_heuristic_values)
 
-    # Combined table
-    generate_latex_table_combined(
+    # Main results: constrained and unconstrained per map, algorithms in columns
+    generate_latex_table_scenarios(
         data,
         baseline_heuristic_values,
+        blocks=[
+            (
+                r"\textbf{ToyExample}",
+                [
+                    ("ToyExample-v2", "Constrained"),
+                    ("ToyExample-v2-unconstrained", "Unconstrained"),
+                ],
+            ),
+            # Cologne with all budget scenarios, constrained first as in the other blocks
+            (
+                r"\textbf{Cologne}",
+                [
+                    ("Cologne-v1-moderate-budget", "Moderate (300M)"),
+                    ("Cologne-v1", "Limited (200M)"),
+                    ("Cologne-v1-critical-budget", "Critical (150M)"),
+                    ("Cologne-v1-unconstrained", "Unconstrained"),
+                ],
+            ),
+            (
+                ENV_DISPLAY_NAMES["CologneBonnDusseldorf-v1"],
+                [
+                    ("CologneBonnDusseldorf-v1", "Constrained"),
+                    ("CologneBonnDusseldorf-v1-unconstrained", "Unconstrained"),
+                ],
+            ),
+        ],
+        output_filename="best_results_main.tex",
         caption=(
-            r"Best performance per algorithm in terms of expected return, 95\% CI for each environment. "
-            r"The best performance per environment is highlighted in bold, and performances within their "
-            r"95\% CI are marked with an underline. $\text{VDN}_{\text{BA}}$ is a modified VDN policy "
-            r"discussed in Section~\ref{subsec:open_challenge}."
+            r"Normalized expected return ($\Delta \bar{R}^\pi_0\%$) with 95\% confidence "
+            r"intervals (CI) for each algorithm and environment configuration, reporting the "
+            r"highest value achieved across all training seeds and evaluation checkpoints. The "
+            r"algorithm with the highest expected return in each environment is highlighted in "
+            r"bold, while algorithms whose 95\% CI overlaps with that of the highest-performing "
+            r"algorithm are underlined. $\text{H}_\text{PS}$ is the reference (0\%); its expected "
+            r"return is given under each scenario. Note that $\text{VDN}_{\text{BA}}$ is a modified VDN "
+            r"policy described in Section~\ref{subsec:open_challenge}."
         ),
         label="tab:best_model_returns",
+        placement="!t",
     )
 
-    cologne_budgets_envs = [
-        "Cologne-v1-unconstrained",
-        "Cologne-v1-moderate-budget",
-        "Cologne-v1",
-        "Cologne-v1-critical-budget",
-    ]
-
-    # Cologne budget scenarios in Figure 4's order, algorithms in columns like the per-seed table
-    generate_latex_table_budgets(
-        data,
-        baseline_heuristic_values,
-        display_name=r"\textbf{Cologne}",
-        envs=cologne_budgets_envs,
-        env_labels=[
-            "Unconstrained",
-            "Moderate (300M)",
-            "Limited (200M)",
-            "Critical (150M)",
-        ],
-        output_filename="best_model_cologne_budget_scenarios.tex",
-        caption=(
-            r"Best performance per algorithm (best checkpoint of the best seed) in terms of "
-            r"normalized expected return ($\Delta \bar{R}^\pi_0$, \%) with its 95\% CI below, for "
-            r"different \texttt{Cologne} budget scenarios. The best performance per scenario is "
-            r"highlighted in bold, and performances within its 95\% CI are marked with an underline. "
-            r"$\text{VDN}_{\text{BA}}$ is a modified VDN policy discussed in "
-            r"Section~\ref{subsec:open_challenge}."
-        ),
-        label="tab:best_model_cologne_budget_scenarios",
-    )
-
-    # Per-seed results table: every map once, two scenarios side by side
+    # Best checkpoint per seed, for the per-seed tables below
     per_seed_results_all = {
         env: get_per_seed_results(
             data[data["map_name"] == env], env, baseline_heuristic_values
         )
         for env in environments
     }
+    # Cologne budget scenarios in Figure 4's order, all seeds (the best seed is in Table 1)
+    generate_latex_table_per_seed(
+        per_seed_results_all,
+        baseline_heuristic_values,
+        blocks=[
+            (
+                r"\textbf{Cologne}",
+                "Cologne-v1-unconstrained",
+                "Cologne-v1-moderate-budget",
+                ("Unconstrained", "Moderate (300M)"),
+            ),
+            (
+                r"\textbf{Cologne}",
+                "Cologne-v1",
+                "Cologne-v1-critical-budget",
+                ("Limited (200M)", "Critical (150M)"),
+            ),
+        ],
+        output_filename="best_model_cologne_budget_scenarios.tex",
+        caption=(
+            r"Best checkpoint performance per seed according to normalized expected return "
+            r"($\Delta \bar{R}^\pi_0$ \%) and IQR, by algorithm, for different \texttt{Cologne} "
+            r"budget scenarios. $\text{H}_\text{PS}$ is the reference (0\%) and is given "
+            r"with its 95\% CI; its expected return is shown in grey. Within each column, seeds are ranked by performance, so a row does not "
+            r"correspond to the same seed across algorithms. $\text{VDN}_{\text{BA}}$ is a modified "
+            r"VDN policy discussed in Section~\ref{subsec:open_challenge}."
+        ),
+        label="tab:best_model_cologne_budget_scenarios",
+    )
+
+    # Per-seed results table: every map once, two scenarios side by side
     constrained_vs_unconstrained = ("Constrained", "Unconstrained")
     generate_latex_table_per_seed(
         per_seed_results_all,
@@ -981,9 +979,9 @@ def main():
         output_filename="best_checkpoints_all.tex",
         caption=(
             r"Best checkpoint performance per seed according to normalized expected return "
-            r"($\Delta \bar{R}^\pi_0$, \%) and IQR, by environment and algorithm. Constrained "
-            r"and unconstrained scenarios are shown side by side. $\text{H}_\text{PS}$ is given with its "
-            r"95\% CI (\%, relative to its mean). Within each column, seeds are "
+            r"($\Delta \bar{R}^\pi_0$ \%) and IQR, by environment and algorithm. Constrained "
+            r"and unconstrained scenarios are shown side by side. $\text{H}_\text{PS}$ is the reference "
+            r"(0\%) and is given with its 95\% CI; its expected return is shown in grey. Within each column, seeds are "
             r"ranked by performance, so a row does not correspond to the same seed across "
             r"algorithms."
         ),

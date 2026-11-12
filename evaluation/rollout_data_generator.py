@@ -20,22 +20,35 @@ class RolloutDataGenerator:
         test_num_envs=10,
         checkpoint_id=None,
         checkpoint_dir=None,
+        checkpoint_path=None,
     ):
         self.env_name = env_name
         self.alg = alg
         vmapped_seed = 0
 
         # Load checkpoint
-        if checkpoint_dir is None and checkpoint_id is None:
+        if checkpoint_path is not None:
+            # Run directory holding config.yaml and checkpoints/<rng>/checkpoint_<id>.safetensors
+            self.checkpoint_dir = os.path.basename(os.path.normpath(checkpoint_path))
+            self.checkpoint_id = checkpoint_id
+        elif checkpoint_dir is None and checkpoint_id is None:
             self.get_checkpoint_dir_and_id()
         else:
             self.checkpoint_dir = checkpoint_dir
             self.checkpoint_id = checkpoint_id
-        checkpoint_path = f"../outputs/{env_name}/{self.alg}/{self.checkpoint_dir}"
+        if checkpoint_path is None:
+            checkpoint_path = f"../outputs/{env_name}/{self.alg}/{self.checkpoint_dir}"
 
         # train config
         train_config = OmegaConf.to_container(
             OmegaConf.load(os.path.join(checkpoint_path, "config.yaml"))
+        )
+        # Saved configs omit NUM_UPDATES, which sets the zero-padding of checkpoint names
+        train_config.setdefault(
+            "NUM_UPDATES",
+            train_config["TOTAL_TIMESTEPS"]
+            // train_config["NUM_STEPS"]
+            // train_config["NUM_ENVS"],
         )
 
         if self.alg in ["mappo_rnn", "mappo"]:
