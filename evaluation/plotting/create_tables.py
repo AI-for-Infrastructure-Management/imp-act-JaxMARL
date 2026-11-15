@@ -1,16 +1,19 @@
-import os
+import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yaml
-
-from create_figures import VDN_CBD_ORDER, iter_vdn_runs
+from create_figures import (
+    BASELINE_HEURISTIC_VALUES,
+    HEURISTICS,
+    VDN_CBD_ORDER,
+    VDN_VARIANTS_FILE,
+)
 
 # Configuration
-DATA_DIR = "evaluation/plotting/data"
-TABLES_DIR = "evaluation/plotting/tables"
-HEURISTIC_RESULTS_FILE = os.path.join(DATA_DIR, "best_heuristic_results.yaml")
-EVALUATION_RESULTS_FILE = os.path.join(DATA_DIR, "combined_evaluation_results.csv")
+DATA_DIR = Path("evaluation/plotting/data")
+TABLES_DIR = Path("evaluation/plotting/tables")
+EVALUATION_RESULTS_FILE = DATA_DIR / "results.csv"
 
 ALGORITHM_NAMES = {
     "vdn_rnn": "VDN",
@@ -34,19 +37,9 @@ ENV_DISPLAY_NAMES = {
 
 
 def load_data():
-    """Loads heuristic results and evaluation data."""
-    with open(HEURISTIC_RESULTS_FILE) as f:
-        heuristic_results = yaml.load(f, Loader=yaml.FullLoader)
-
-    baseline_heuristic_values = {}
-    for env, results in heuristic_results.items():
-        if "segment_based_heuristic" in results:
-            baseline_heuristic_values[env] = results["segment_based_heuristic"][
-                "mean_reward"
-            ]
-
+    """Loads evaluation data and the H_PS value per map."""
     data = pd.read_csv(EVALUATION_RESULTS_FILE)
-    return data, baseline_heuristic_values
+    return data, BASELINE_HEURISTIC_VALUES
 
 
 def get_best_checkpoints(data, env_name, baseline_heuristic_values):
@@ -60,11 +53,11 @@ def get_best_checkpoints(data, env_name, baseline_heuristic_values):
 
     for alg in algorithms:
         alg_data = data[data["algorithm"] == alg]
-        runs = alg_data["WANDB_RUN_ID"].unique()
+        runs = alg_data["run"].unique()
 
         best_runs = []
         for run in runs:
-            run_data = alg_data[alg_data["WANDB_RUN_ID"] == run]
+            run_data = alg_data[alg_data["run"] == run]
             best_idx = run_data["mean"].idxmax()
             best_row = run_data.loc[best_idx]
 
@@ -235,8 +228,8 @@ def generate_latex_table(
 
     latex_lines.append(r"  \end{tabular}")
 
-    os.makedirs(TABLES_DIR, exist_ok=True)
-    output_path = os.path.join(TABLES_DIR, output_filename)
+    TABLES_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = TABLES_DIR / output_filename
     with open(output_path, "w") as f:
         f.write("\n".join(latex_lines))
     print(f"Table saved to {output_path}")
@@ -247,13 +240,13 @@ def generate_latex_table(
 EXTRA_ALGORITHMS = {"vdn_ba_rnn"}
 
 
-def best_model_stats(data, baseline_heuristic_values, heuristic_results, env):
+def best_model_stats(data, baseline_heuristic_values, env):
     """
     Best checkpoint across all seeds per algorithm on env, as % vs H_PS, with that checkpoint's
     own 95% CI. H_PS is best if no algorithm beats it; results whose CI overlaps the best
     one's are marked tied. EXTRA_ALGORITHMS are never best or tied.
     """
-    h = heuristic_results[env]["segment_based_heuristic"]
+    h = HEURISTICS.loc[(env, "segment_based_heuristic")]
     h_mean = baseline_heuristic_values[env]
 
     def to_pct(v):
@@ -342,9 +335,6 @@ def generate_latex_table_scenarios(
     ]  # VDN_BA next to H_PS
     last_col = 3 + len(algorithms)
 
-    with open(HEURISTIC_RESULTS_FILE) as f:
-        heuristic_results = yaml.load(f, Loader=yaml.FullLoader)
-
     latex_lines = []
     latex_lines.append(
         r"  \begin{tabular}{@{}cl" + "c" * (1 + len(algorithms)) + "@{}}"
@@ -375,7 +365,7 @@ def generate_latex_table_scenarios(
         )
         for i, (env, env_label) in enumerate(rows):
             alg_stats, h_stats = best_model_stats(
-                data, baseline_heuristic_values, heuristic_results, env
+                data, baseline_heuristic_values, env
             )
             # Value row, then its 95% CI row; H_PS's absolute return goes under the scenario
             # label, in the CI row so both rows keep the same height
@@ -420,8 +410,8 @@ def generate_latex_table_scenarios(
             latex_lines, caption, label, placement, arraystretch=1.15
         )
 
-    os.makedirs(TABLES_DIR, exist_ok=True)
-    output_path = os.path.join(TABLES_DIR, output_filename)
+    TABLES_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = TABLES_DIR / output_filename
     with open(output_path, "w") as f:
         f.write("\n".join(latex_lines))
     print(f"Table saved to {output_path}")
@@ -439,11 +429,11 @@ def get_per_seed_results(data, env_name, baseline_heuristic_values):
 
     for alg in algorithms:
         alg_data = data[data["algorithm"] == alg]
-        runs = alg_data["WANDB_RUN_ID"].unique()
+        runs = alg_data["run"].unique()
 
         seed_results = []
         for i, run in enumerate(runs):
-            run_data = alg_data[alg_data["WANDB_RUN_ID"] == run]
+            run_data = alg_data[alg_data["run"] == run]
             best_idx = run_data["mean"].idxmax()
             best_row = run_data.loc[best_idx]
 
@@ -480,9 +470,6 @@ def generate_latex_table_per_seed(
     Rows are ranks: each algorithm's seeds are sorted by performance independently.
     With a caption, the tabular is wrapped in a full-page table (see wrap_table).
     """
-    with open(HEURISTIC_RESULTS_FILE) as f:
-        heuristic_results = yaml.load(f, Loader=yaml.FullLoader)
-
     all_algorithms = [
         "vdn_ba_rnn",
         "vdn_rnn",
@@ -558,7 +545,7 @@ def generate_latex_table_per_seed(
         h_strs = []
         for env in (left_env, right_env):
             h_mean = baseline_heuristic_values[env]
-            h = heuristic_results[env]["segment_based_heuristic"]
+            h = HEURISTICS.loc[(env, "segment_based_heuristic")]
             lo, hi = (
                 (v - h_mean) / abs(h_mean) * 100
                 for v in (h["lower_95ci"], h["upper_95ci"])
@@ -643,8 +630,8 @@ def generate_latex_table_per_seed(
     if caption is not None:
         latex_lines = wrap_table(latex_lines, caption, label, "h", arraystretch=1.15)
 
-    os.makedirs(TABLES_DIR, exist_ok=True)
-    output_path = os.path.join(TABLES_DIR, output_filename)
+    TABLES_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = TABLES_DIR / output_filename
     with open(output_path, "w") as f:
         f.write("\n".join(latex_lines))
     print(f"Per-seed table saved to {output_path}")
@@ -659,9 +646,6 @@ def generate_heuristic_comparison_table(
 
     blocks: list of (display name, [(env, budget label), ...]), one Environment cell per block.
     """
-    with open(HEURISTIC_RESULTS_FILE) as f:
-        heuristic_results = yaml.load(f, Loader=yaml.FullLoader)
-
     heuristic_order = [
         "do_nothing",
         "random",
@@ -694,13 +678,13 @@ def generate_heuristic_comparison_table(
             + r"}}}"
         )
         for env, budget_label in rows:
-            results = heuristic_results[env]
-            best = max(heuristic_order, key=lambda h: results[h]["mean_reward"])
+            results = HEURISTICS.loc[env]
+            best = results.loc[heuristic_order, "mean_reward"].idxmax()
             cells = []
             for h in heuristic_order:
-                mean = f"{results[h]['mean_reward'] / 1e9:.2f}"
+                mean = f"{results.loc[h, 'mean_reward'] / 1e9:.2f}"
                 mean = f"$\\mathbf{{{mean}}}$" if h == best else f"${mean}$"
-                cells.append(f"{mean} ({results[h]['std_reward'] / 1e9:.2f})")
+                cells.append(f"{mean} ({results.loc[h, 'std_reward'] / 1e9:.2f})")
             latex_lines.append(f"    & {budget_label} & " + " & ".join(cells) + r" \\")
         if k != len(blocks) - 1:
             latex_lines.append(r"    \midrule")
@@ -713,8 +697,8 @@ def generate_heuristic_comparison_table(
     if caption is not None:
         latex_lines = wrap_table(latex_lines, caption, label, "h", arraystretch=1.2)
 
-    os.makedirs(TABLES_DIR, exist_ok=True)
-    output_path = os.path.join(TABLES_DIR, output_filename)
+    TABLES_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = TABLES_DIR / output_filename
     with open(output_path, "w") as f:
         f.write("\n".join(latex_lines))
     print(f"Heuristic comparison table saved to {output_path}")
@@ -727,9 +711,6 @@ def generate_heuristic_parameters_table(
     Generates LaTeX table of the best segment_based_heuristic's parameters, laid out like the
     heuristic comparison table (same blocks: one Environment cell, one row per budget scenario).
     """
-    with open(HEURISTIC_RESULTS_FILE) as f:
-        heuristic_results = yaml.load(f, Loader=yaml.FullLoader)
-
     prioritization_names = {
         ("volumes", "positive"): "highest base traffic volume",
         ("volumes", "negative"): "lowest base traffic volume",
@@ -757,7 +738,7 @@ def generate_heuristic_parameters_table(
             + r"}}}"
         )
         for env, budget_label in rows:
-            params = heuristic_results[env]["segment_based_heuristic"]["parameters"]
+            params = json.loads(HEURISTICS.loc[(env, "segment_based_heuristic"), "parameters"])
             if params.get("prioritization_enabled", False):
                 key = (
                     "costs"
@@ -786,8 +767,8 @@ def generate_heuristic_parameters_table(
     if caption is not None:
         latex_lines = wrap_table(latex_lines, caption, label, "h", arraystretch=1.2)
 
-    os.makedirs(TABLES_DIR, exist_ok=True)
-    output_path = os.path.join(TABLES_DIR, output_filename)
+    TABLES_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = TABLES_DIR / output_filename
     with open(output_path, "w") as f:
         f.write("\n".join(latex_lines))
     print(f"Heuristic parameters table saved to {output_path}")
@@ -804,7 +785,7 @@ def generate_vdn_cbd_configs_table(
     output_filename="vdn_cbd_unconstrained_configs.tex",
 ):
     """Hyperparameters of the VDN configurations in the unconstrained CologneBonnDusseldorf
-    appendix figure, read from the run configs. Only a tabular: the appendix sets it next to
+    appendix figure, read from vdn_variants.csv. Only a tabular: the appendix sets it next to
     the figure with \\captionof. "--" marks a value equal to rank 1 (bold)."""
     columns = {
         r"\thead{LR}": lambda c: format_lr_latex(c["LR"]),
@@ -815,7 +796,9 @@ def generate_vdn_cbd_configs_table(
         r"\thead{Steps}": lambda c: f"{c['TOTAL_TIMESTEPS'] / 1e6:g}M",
     }
     configs = {}
-    for label, cfg, _ in iter_vdn_runs(env):
+    runs = pd.read_csv(VDN_VARIANTS_FILE)
+    for cfg in runs[runs["map_name"] == env].to_dict("records"):
+        label = cfg["configuration"]
         values = [fmt(cfg) for fmt in columns.values()]
         if configs.setdefault(label, values) != values:
             raise ValueError(f"Seeds of {label} on {env} differ in hyperparameters")
@@ -845,8 +828,8 @@ def generate_vdn_cbd_configs_table(
         latex_lines.append("    " + " & ".join(cells) + r" \\")
     latex_lines += [r"    \bottomrule", r"\end{tabular}"]
 
-    os.makedirs(TABLES_DIR, exist_ok=True)
-    output_path = os.path.join(TABLES_DIR, output_filename)
+    TABLES_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = TABLES_DIR / output_filename
     with open(output_path, "w") as f:
         f.write("\n".join(latex_lines) + "\n")
     print(f"VDN configurations table saved to {output_path}")

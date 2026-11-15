@@ -1,4 +1,5 @@
-import os
+import urllib.request
+from pathlib import Path
 
 import matplotlib.colors as mcolors
 import matplotlib.lines as mlines
@@ -8,14 +9,39 @@ import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 import seaborn as sns
-import yaml
 from scipy.stats import trim_mean
 
 # Configuration
-DATA_DIR = "evaluation/plotting/data"
-FIGURES_DIR = "evaluation/plotting/figures"
-HEURISTIC_RESULTS_FILE = os.path.join(DATA_DIR, "best_heuristic_results.yaml")
-EVALUATION_RESULTS_FILE = os.path.join(DATA_DIR, "combined_evaluation_results.csv")
+DATA_DIR = Path("evaluation/plotting/data")
+FIGURES_DIR = Path("evaluation/plotting/figures")
+HEURISTIC_RESULTS_FILE = DATA_DIR / "heuristics.csv"
+EVALUATION_RESULTS_FILE = DATA_DIR / "results.csv"
+# The input files are released on Zenodo; missing ones are downloaded from there
+ZENODO_FILES_URL = "https://zenodo.org/records/24175731/files"
+INPUT_FILES = ["results.csv", "heuristics.csv", "tuning_results.parquet", "vdn_variants.csv"]
+
+
+def download_missing_inputs():
+    """Download the input files that are not in DATA_DIR yet from the Zenodo record."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    for name in INPUT_FILES:
+        path = DATA_DIR / name
+        if path.exists():
+            continue
+        print(f"Downloading {name} from {ZENODO_FILES_URL}")
+        partial = path.with_name(f"{name}.part")  # renamed once complete
+        urllib.request.urlretrieve(f"{ZENODO_FILES_URL}/{name}?download=1", partial)
+        partial.rename(path)
+
+
+download_missing_inputs()
+
+# Heuristic results, one row per (map_name, heuristic)
+HEURISTICS = pd.read_csv(HEURISTIC_RESULTS_FILE).set_index(["map_name", "heuristic"])
+# H_PS: the segment-based heuristic that the algorithms are compared with
+BASELINE_HEURISTIC_VALUES = HEURISTICS.xs("segment_based_heuristic", level="heuristic")[
+    "mean_reward"
+].to_dict()
 
 
 ALGORITHM_NAMES = {
@@ -75,17 +101,9 @@ ABSOLUTE_RETURN_LABEL = r"Expected Return ($\mathbb{E}\left[R_0^\pi\right]$)"
 
 
 def load_data():
-    """Loads heuristic results and evaluation data."""
-    with open(HEURISTIC_RESULTS_FILE) as f:
-        heuristic_results = yaml.load(f, Loader=yaml.FullLoader)
-
-    baseline_heuristic_values = {
-        env: results["segment_based_heuristic"]["mean_reward"]
-        for env, results in heuristic_results.items()
-    }
-
+    """Loads evaluation data and the H_PS value per map."""
     data = pd.read_csv(EVALUATION_RESULTS_FILE)
-    return data, baseline_heuristic_values
+    return data, BASELINE_HEURISTIC_VALUES
 
 
 def get_best_checkpoints(data, env_name, baseline_heuristic_values):
@@ -99,11 +117,11 @@ def get_best_checkpoints(data, env_name, baseline_heuristic_values):
 
     for alg in algorithms:
         alg_data = data[data["algorithm"] == alg]
-        runs = alg_data["WANDB_RUN_ID"].unique()
+        runs = alg_data["run"].unique()
 
         best_runs = {}
         for run in runs:
-            run_max = alg_data[alg_data["WANDB_RUN_ID"] == run]["mean"].max()
+            run_max = alg_data[alg_data["run"] == run]["mean"].max()
             # Normalize
             best_runs[run] = (run_max - heuristic_score) / abs(heuristic_score)
 
@@ -436,8 +454,8 @@ def create_plots(
     plt.tight_layout()
     plt.subplots_adjust(wspace=0.0)
 
-    os.makedirs(FIGURES_DIR, exist_ok=True)
-    plt.savefig(os.path.join(FIGURES_DIR, f"{filename}.pdf"), bbox_inches="tight")
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    plt.savefig(FIGURES_DIR / f"{filename}.pdf", bbox_inches="tight")
     print(f"Figures saved to {FIGURES_DIR}")
 
 
@@ -653,8 +671,8 @@ def create_plots_combined(
         borderaxespad=0.0,
     )
 
-    os.makedirs(FIGURES_DIR, exist_ok=True)
-    plt.savefig(os.path.join(FIGURES_DIR, f"{filename}.pdf"), bbox_inches="tight")
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    plt.savefig(FIGURES_DIR / f"{filename}.pdf", bbox_inches="tight")
     print(f"Figures saved to {FIGURES_DIR}")
 
 
@@ -679,7 +697,7 @@ def training_curve_stats(env_data, alg):
     alg_data["env_steps"] = (
         alg_data["checkpoint_step"] + UPDATE_INDEX_OFFSET.get(alg, 0)
     ) * STEPS_PER_UPDATE[alg]
-    returns = alg_data.pivot(index="env_steps", columns="WANDB_RUN_ID", values="mean")
+    returns = alg_data.pivot(index="env_steps", columns="run", values="mean")
     iqm = returns.apply(lambda row: trim_mean(row.dropna(), 0.25), axis=1)
     q25 = returns.quantile(0.25, axis=1)
     q75 = returns.quantile(0.75, axis=1)
@@ -849,8 +867,8 @@ def create_training_curves(
         borderaxespad=0.0,
     )
 
-    os.makedirs(FIGURES_DIR, exist_ok=True)
-    plt.savefig(os.path.join(FIGURES_DIR, f"{filename}.pdf"), bbox_inches="tight")
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    plt.savefig(FIGURES_DIR / f"{filename}.pdf", bbox_inches="tight")
     plt.close(fig)
     print(f"Figures saved to {FIGURES_DIR}")
 
@@ -866,73 +884,25 @@ ROLLOUT_TIMES = {
 VDN_TRAINING_TIMES = {"numpy_epymarl": 1_987_397, "jax_jaxmarl": 21_952}
 
 
-# VDN hyperparameter sensitivity (appendix). Cached W&B runs from
-# evaluation/vdn_cbd_analysis.ipynb and evaluation/vdn_cologne_analysis.ipynb.
-VDN_CACHE_DIRS = {
-    "Cologne-v1": "evaluation/data/vdn_cologne",
-    "Cologne-v1-unconstrained": "evaluation/data/vdn_cologne",
-    "CologneBonnDusseldorf-v1": "evaluation/data/vdn_cbd_unconstrained",
-    "CologneBonnDusseldorf-v1-unconstrained": "evaluation/data/vdn_cbd_unconstrained",
-}
-# Rank of each configuration in the VDN tuning sweep on Cologne (1 = selected)
-VDN_COMBO_RANKS = {"C0003": 2, "C0023": 3, "C0004": 4, "C0043": 5}
-VDN_SINGLE_CHANGES = {"vdn_lr": "LR only", "vdn_hidden": "Hidden only"}
+# VDN hyperparameter sensitivity (appendix): one row per VDN run, with its configuration
+# label (Rank 1, Rank 2-5, LR only, Hidden only, 100M steps) and best test return
+VDN_VARIANTS_FILE = DATA_DIR / "vdn_variants.csv"
+# Every run of the hyperparameter tuning sweep on Cologne, one row per logged update
+TUNING_RESULTS_FILE = DATA_DIR / "tuning_results.parquet"
 
 
-def iter_vdn_runs(env_name):
-    """(label, config, run_dir) of every labelled VDN configuration run on `env_name`."""
-    cache = VDN_CACHE_DIRS[env_name]
-    projects = {
-        f"imp-act-jaxMARL-final-runs_{env_name}": "final",
-        f"imp-act-jaxMARL-final-runs_{env_name}__vdn_rnn_100M": "100M",
-        f"imp-act-jaxMARL-vdn-ablation_{env_name}": "ablation",
-    }
-    for project, kind in projects.items():
-        project_dir = os.path.join(cache, project)
-        if not os.path.isdir(project_dir):
-            continue
-        for run_id in sorted(os.listdir(project_dir)):
-            run_dir = os.path.join(project_dir, run_id)
-            with open(os.path.join(run_dir, "config.yaml")) as f:
-                cfg = yaml.safe_load(f)
-            if cfg.get("ALG_NAME") != "vdn_rnn":
-                continue
-
-            if kind == "final":
-                label = "Rank 1" if cfg["TOTAL_TIMESTEPS"] == 50_000_000 else None
-            elif kind == "100M":
-                label = "100M steps"
-            else:
-                folder = cfg.get("HYDRA_PATH", "").split("/")[-2]
-                combo = folder.removeprefix("vdn_").upper()
-                if folder in VDN_SINGLE_CHANGES:
-                    label = VDN_SINGLE_CHANGES[folder]
-                elif combo in VDN_COMBO_RANKS:
-                    label = f"Rank {VDN_COMBO_RANKS[combo]}"
-                else:
-                    label = None
-            if label is not None:
-                yield label, cfg, run_dir
+def load_vdn_runs(env_name):
+    """The VDN runs on `env_name` that reached at least 95% of TOTAL_TIMESTEPS."""
+    runs = pd.read_csv(VDN_VARIANTS_FILE)
+    runs = runs[runs["map_name"] == env_name]
+    return runs[runs["last_env_step"] >= 0.95 * runs["TOTAL_TIMESTEPS"]]
 
 
 def load_vdn_variants(env_name, heuristic_value):
-    """Best test return per seed (% over H_PS) for every VDN configuration run on `env_name`.
-
-    Only seeds that reached at least 95% of TOTAL_TIMESTEPS are kept.
-    """
-    results = {}
-    for label, cfg, run_dir in iter_vdn_runs(env_name):
-        history_file = os.path.join(run_dir, "history.csv")
-        if not os.path.exists(history_file):
-            continue
-        history = pd.read_csv(history_file)[["env_step", "test_returned_episode_returns"]].dropna()
-        if history.empty or history["env_step"].max() < 0.95 * cfg["TOTAL_TIMESTEPS"]:
-            continue
-        best = history["test_returned_episode_returns"].max()
-        results.setdefault(label, []).append(
-            (best - heuristic_value) / abs(heuristic_value) * 100
-        )
-    return results
+    """Best test return per seed (% over H_PS) for every VDN configuration run on `env_name`."""
+    runs = load_vdn_runs(env_name)
+    pct = (runs["best_test_return"] - heuristic_value) / abs(heuristic_value) * 100
+    return {label: list(values) for label, values in pct.groupby(runs["configuration"], sort=False)}
 
 
 # Order of the configurations in the CologneBonnDusseldorf-unconstrained figure and table:
@@ -954,7 +924,6 @@ def median_color(face_color):
     """Median line color that stays visible on the box fill (white on dark fills)."""
     r, g, b = mcolors.to_rgb(face_color)
     return "white" if 0.299 * r + 0.587 * g + 0.114 * b < 0.45 else "#3a3a3a"
-VDN_TUNING_DIR = "evaluation/data/hyper_parameter_tuning/hyper_parameter_tuning_Cologne-v1"
 
 
 def load_vdn_tuning_ranking(heuristic_value, n_bins=100):
@@ -963,20 +932,14 @@ def load_vdn_tuning_ranking(heuristic_value, n_bins=100):
     Per combination: best test return of each seed and the learning curve of each seed
     (last test return in each of `n_bins` equal env-step bins), both as % over H_PS.
     """
+    columns = ["algorithm", "COMBO_ID", "SEED", "TOTAL_TIMESTEPS", "env_step", "test_returned_episode_returns"]
+    tuning = pd.read_parquet(TUNING_RESULTS_FILE, columns=columns)
+    tuning = tuning[tuning["algorithm"] == "vdn_rnn"].dropna(subset=["test_returned_episode_returns"])
     seeds, curves = {}, {}
-    total_steps = None
-    for run_id in sorted(os.listdir(VDN_TUNING_DIR)):
-        run_dir = os.path.join(VDN_TUNING_DIR, run_id)
-        with open(os.path.join(run_dir, "config.yaml")) as f:
-            cfg = yaml.safe_load(f)
-        if cfg.get("ALG_NAME") != "vdn_rnn":
-            continue
-        history = pd.read_csv(os.path.join(run_dir, "history.csv"))
-        history = history[["env_step", "test_returned_episode_returns"]].dropna()
-        pct = (history["test_returned_episode_returns"] - heuristic_value) / abs(heuristic_value) * 100
-        bins = np.minimum((history["env_step"] / cfg["TOTAL_TIMESTEPS"] * n_bins).astype(int), n_bins - 1)
-        combo = cfg["COMBO_ID"]
-        total_steps = cfg["TOTAL_TIMESTEPS"]
+    for (combo, _), run in tuning.groupby(["COMBO_ID", "SEED"], sort=False):
+        total_steps = run["TOTAL_TIMESTEPS"].iloc[0]
+        pct = (run["test_returned_episode_returns"] - heuristic_value) / abs(heuristic_value) * 100
+        bins = np.minimum((run["env_step"] / total_steps * n_bins).astype(int), n_bins - 1)
         seeds.setdefault(combo, []).append(pct.max())
         curve = pct.groupby(bins).last().reindex(range(n_bins))
         # Light smoothing over neighbouring bins, as test returns are noisy
@@ -1043,10 +1006,10 @@ def box_legend(ax, loc, ncol=2):
 
 
 def save_vdn_figure(fig, filename):
-    os.makedirs(FIGURES_DIR, exist_ok=True)
-    plt.savefig(os.path.join(FIGURES_DIR, f"{filename}.pdf"), bbox_inches="tight")
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    plt.savefig(FIGURES_DIR / f"{filename}.pdf", bbox_inches="tight")
     plt.close(fig)
-    print(f"Figure saved to {os.path.join(FIGURES_DIR, filename)}.pdf")
+    print(f"Figure saved to {FIGURES_DIR / filename}.pdf")
 
 
 def create_vdn_tuning_figure(
@@ -1256,7 +1219,7 @@ def create_vdn_cbd_unconstrained_figure(
     order = [label for label in VDN_CBD_ORDER if label in variants]
     colors = [
         VDN_COLORS["Rank 1"] if label == "Rank 1"
-        else VDN_COLORS["single"] if label in VDN_SINGLE_CHANGES.values()
+        else VDN_COLORS["single"] if label in ("LR only", "Hidden only")
         else VDN_COLORS["100M steps"] if label == "100M steps"
         else VDN_COLORS["alternative"]
         for label in order
@@ -1450,8 +1413,8 @@ def create_speedup_figure(filename="Figure_3_JAX_Speedup", figsize=(3.0, 2.0)):
         fontsize=5,
     )
 
-    os.makedirs(FIGURES_DIR, exist_ok=True)
-    plt.savefig(os.path.join(FIGURES_DIR, f"{filename}.pdf"), bbox_inches="tight")
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    plt.savefig(FIGURES_DIR / f"{filename}.pdf", bbox_inches="tight")
     plt.close(fig)
     print(f"Figures saved to {FIGURES_DIR}")
 
