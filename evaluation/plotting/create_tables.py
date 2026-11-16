@@ -5,14 +5,15 @@ import numpy as np
 import pandas as pd
 from create_figures import (
     BASELINE_HEURISTIC_VALUES,
+    DATA_DIR,
     HEURISTICS,
+    PLOTTING_DIR,
     VDN_CBD_ORDER,
     VDN_VARIANTS_FILE,
 )
 
 # Configuration
-DATA_DIR = Path("evaluation/plotting/data")
-TABLES_DIR = Path("evaluation/plotting/tables")
+TABLES_DIR = PLOTTING_DIR / "tables"
 EVALUATION_RESULTS_FILE = DATA_DIR / "results.csv"
 
 ALGORITHM_NAMES = {

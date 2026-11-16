@@ -1,3 +1,4 @@
+import os
 import urllib.request
 from pathlib import Path
 
@@ -11,9 +12,11 @@ import pandas as pd
 import seaborn as sns
 from scipy.stats import trim_mean
 
-# Configuration
-DATA_DIR = Path("evaluation/plotting/data")
-FIGURES_DIR = Path("evaluation/plotting/figures")
+# Configuration. Paths are relative to this folder, so the script runs (and imports) from
+# anywhere, and are shown relative to the working directory.
+PLOTTING_DIR = Path(os.path.relpath(Path(__file__).resolve().parent))
+DATA_DIR = PLOTTING_DIR / "data"
+FIGURES_DIR = PLOTTING_DIR / "figures"
 HEURISTIC_RESULTS_FILE = DATA_DIR / "heuristics.csv"
 EVALUATION_RESULTS_FILE = DATA_DIR / "results.csv"
 # The input files are released on Zenodo; missing ones are downloaded from there
