@@ -1,6 +1,5 @@
 import copy
 import os
-import pandas as pd
 import jax
 import jax.numpy as jnp
 from omegaconf import OmegaConf
@@ -8,36 +7,20 @@ from omegaconf import OmegaConf
 import jaxmarl
 from jaxmarl.wrappers.baselines import CTRolloutManager
 
-from safetensors.flax import save_file, load_file
-
 
 class RolloutDataGenerator:
 
-    def __init__(
-        self,
-        env_name,
-        alg,
-        test_num_envs=10,
-        checkpoint_id=None,
-        checkpoint_dir=None,
-        checkpoint_path=None,
-    ):
+    def __init__(self, env_name, alg, checkpoint_path, checkpoint_id, test_num_envs=10):
+        """Roll out the checkpoint `checkpoint_id` of the run directory `checkpoint_path`.
+
+        The run directory holds config.yaml and
+        checkpoints/<vmapped_seed_key>/checkpoint_<id>.safetensors (the layout of the
+        released checkpoints).
+        """
         self.env_name = env_name
         self.alg = alg
+        self.checkpoint_id = checkpoint_id
         vmapped_seed = 0
-
-        # Load checkpoint
-        if checkpoint_path is not None:
-            # Run directory holding config.yaml and checkpoints/<rng>/checkpoint_<id>.safetensors
-            self.checkpoint_dir = os.path.basename(os.path.normpath(checkpoint_path))
-            self.checkpoint_id = checkpoint_id
-        elif checkpoint_dir is None and checkpoint_id is None:
-            self.get_checkpoint_dir_and_id()
-        else:
-            self.checkpoint_dir = checkpoint_dir
-            self.checkpoint_id = checkpoint_id
-        if checkpoint_path is None:
-            checkpoint_path = f"../outputs/{env_name}/{self.alg}/{self.checkpoint_dir}"
 
         # train config
         train_config = OmegaConf.to_container(
@@ -88,7 +71,6 @@ class RolloutDataGenerator:
                 checkpoint_path, self.checkpoint_id, vmapped_seed, train_config
             )
 
-        # ToDo
         elif self.alg in ["qmix_rnn", "qmix"]:
             from qmix_rnn_road_env import (
                 load_checkpoint_agent,
@@ -130,51 +112,6 @@ class RolloutDataGenerator:
         self.loaded_params = loaded_params
         self.env = env
         self.road_env = env.env
-
-    def get_checkpoint_dir_and_id(self):
-        inference_df = pd.read_csv("inference_results.csv")
-
-        _runs = inference_df[
-            (inference_df["algorithm"] == self.alg)
-            & (inference_df["map_name"] == self.env_name)
-        ]
-
-        print("Selected best checkpoint dir and id")
-        _runs = (
-            _runs.sort_values(by=["mean"], ascending=False)
-            .reset_index(drop=True)
-            .iloc[0]
-        )
-
-        # Extract the run directory name from any absolute path that includes
-        # .../outputs/<env>/<alg>/<run_dir>
-        raw_dir = str(_runs["checkpoint_dir_name"]) if "checkpoint_dir_name" in _runs else ""
-        run_dir = raw_dir
-        outputs_path = None
-        if "outputs/" in raw_dir:
-            try:
-                # Keep the portion after 'outputs/': '<env>/<alg>/<run_dir>'
-                suffix = raw_dir.split("outputs/", 1)[1].strip("/")
-                outputs_path = f"outputs/{suffix}"
-                parts = suffix.split("/")
-                # Expect at least: env, alg, run_dir
-                if len(parts) >= 3:
-                    run_dir = parts[2]
-                else:
-                    run_dir = os.path.basename(raw_dir.rstrip("/"))
-            except Exception:
-                run_dir = os.path.basename(raw_dir.rstrip("/"))
-        else:
-            # Fallback to basename if path does not contain 'outputs/'
-            run_dir = os.path.basename(raw_dir.rstrip("/"))
-
-        self.checkpoint_dir = run_dir
-        self.checkpoint_id = int(_runs["checkpoint_id"]) if "checkpoint_id" in _runs else None
-
-        # Verbose prints of source and extracted paths
-        if outputs_path:
-            print(f"Extracted outputs path: {outputs_path}")
-        print(f"Using run dir: {self.checkpoint_dir}, checkpoint id: {self.checkpoint_id}")
 
     def generate_rollout_data(self, key, verbose=False):
         """
@@ -303,43 +240,3 @@ class RolloutDataGenerator:
                 print(f"{key:<35}", value.shape)
 
         return episode_data
-
-    @staticmethod
-    def get_single_episode_data(episode_data, episode_idx=0):
-        """Get a single episode data from the rollout data"""
-        return jax.tree_map(lambda x: x[episode_idx], episode_data)
-
-    def save_rollout_data(self, episode_data):
-        """Save the rollout data to .safetensors file"""
-
-        os.makedirs(
-            f"./rollout_data/{self.env_name}/{self.alg}/{self.checkpoint_dir}",
-            exist_ok=True,
-        )
-
-        # Save the rollout data
-        save_file(
-            episode_data,
-            f"./rollout_data/{self.env_name}/{self.alg}/{self.checkpoint_dir}/rollout_data_{self.checkpoint_id}.safetensors",
-        )
-        print(
-            f"Rollout data saved to {self.env_name}/{self.alg}/{self.checkpoint_dir}/rollout_data_{self.checkpoint_id}.safetensors"
-        )
-
-    def load_rollout_data(self):
-        """Load the rollout data from .safetensors file"""
-
-        try:
-            # Load the rollout data
-            rollout_data = load_file(
-                f"./rollout_data/{self.env_name}/{self.alg}/{self.checkpoint_dir}/rollout_data_{self.checkpoint_id}.safetensors"
-            )
-
-            print(
-                f"Rollout data loaded from {self.env_name}/{self.alg}/{self.checkpoint_dir}/rollout_data_{self.checkpoint_id}.safetensors"
-            )
-        except FileNotFoundError:
-            print(
-                f"Rollout data not found in {self.env_name}/{self.alg}/{self.checkpoint_dir}/rollout_data_{self.checkpoint_id}.safetensors. Generating new rollout data."
-            )
-        return rollout_data

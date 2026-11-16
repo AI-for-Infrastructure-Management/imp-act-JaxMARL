@@ -1,5 +1,4 @@
 import math
-from typing import ClassVar
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -62,51 +61,8 @@ class RolloutPlotter:
         self.env = env.env
         self.num_components = env.num_agents
         self.num_damage_states = env.env.num_damage_states
-        self.num_component_actions = len(env.env.action_map)
         self.max_timesteps = env.env.max_timesteps
         self.base_total_travel_time = env.env.base_total_travel_time
-        self.initial_edge_volumes = None
-
-    # ---------------------------------------------------------------- actions
-    # The five actions are an ordered severity ladder, so darkness climbs with it:
-    # minor/major repair used to be `blue` (luminance 0.07) and `dodgerblue` (0.50), i.e.
-    # the more severe action was the lighter one. Inspections are hollow because they
-    # observe without changing the asset -- and routine inspection is by far the most
-    # common action, so a filled marker dominates the panel.
-    ACTION_MARKERS: ClassVar[list[str]] = ["o", "o", "^", "^", "*"]
-    ACTION_COLORS: ClassVar[list[str]] = [
-        "gray",
-        "orange",
-        "dodgerblue",
-        "#0b5394",
-        "darkviolet",
-    ]
-    ACTION_HOLLOW: ClassVar[list[bool]] = [True, True, False, False, False]
-    # routine inspection is small as well as hollow: it is by far the most common action
-    # and should recede, so the repairs read as the events
-    ACTION_SIZES: ClassVar[list[float]] = [3.5, 7, 7, 7, 7]
-
-    def _marker_kwargs(self, action):
-        if self.ACTION_HOLLOW[action]:
-            return {"mfc": "none", "mec": self.ACTION_COLORS[action], "mew": 1.2}
-        return {"color": self.ACTION_COLORS[action]}
-
-    def _draw_actions(self, ax, values, y, mask=None, alpha=1.0, zorder=3, scale=1.0):
-        """Plot one row of action markers at height y."""
-        for a in range(self.num_component_actions):
-            m = values == a
-            if mask is not None:
-                m = m & mask
-            ax.plot(
-                np.where(m)[0],
-                np.full(m.sum(), y),
-                marker=self.ACTION_MARKERS[a],
-                markersize=self.ACTION_SIZES[a] * scale,
-                linestyle="None",
-                alpha=alpha,
-                zorder=zorder,
-                **self._marker_kwargs(a),
-            )
 
     def _segment_length_ranks(self):
         """Rank 1 is the longest segment."""
@@ -457,79 +413,3 @@ class RolloutPlotter:
         if save_kwargs is not None:
             fig.savefig(**save_kwargs)
         plt.show()
-
-
-ACTION_DENSITY_LABELS: list[str] = [
-    "do-nothing",
-    "inspect",
-    "minor-repair",
-    "major-repair",
-    "replace",
-]
-
-
-def plot_action_stats(action_stats_data, save_kwargs=None, figsize=(13, 5.0)):
-    """
-    Plot the action statistics for each agent.
-
-    Parameters
-    ----------
-    action_stats_data : np.ndarray
-    shape: (NUM_EPISODES, NUM_TIMESTEPS, NUM_AGENTS)
-    action_stats_data[i, j, k] = action taken by agent k at timestep j in episode i
-
-    One strip per action, each on its own y-scale. The data is a
-    (num_actions x num_agents) matrix of proportions, so one subplot per agent is a very
-    tall way to draw it; and the densities span four orders of magnitude (do-nothing ~70%,
-    major-repair ~0.008%), so a shared y-scale flattens every action but the first two.
-    """
-
-    NUM_EPISODES, _, NUM_AGENTS = action_stats_data.shape
-    num_actions = int(np.max(action_stats_data)) + 1
-    labels = ACTION_DENSITY_LABELS[:num_actions]
-
-    # (num_actions, NUM_AGENTS) share of steps each agent spent on each action
-    density = np.stack(
-        [(action_stats_data == a).mean(axis=(0, 1)) for a in range(num_actions)]
-    )
-
-    fig, axes = plt.subplots(num_actions, 1, figsize=figsize, sharex=True)
-    axes = np.atleast_1d(axes)
-
-    for a, (ax, label) in enumerate(zip(axes, labels)):
-        row = density[a] * 100
-        ax.bar(np.arange(NUM_AGENTS), row, width=0.72, color="#4b8b95", lw=0)
-        ax.axhline(row.mean(), color="#d1495b", lw=0.8, ls=(0, (3, 2)))
-        ax.text(
-            0.995,
-            0.88,
-            f"mean {row.mean():.3g}%",
-            transform=ax.transAxes,
-            ha="right",
-            va="top",
-            fontsize=6,
-            color="#d1495b",
-        )
-        ax.set_ylabel(label, fontsize=7, rotation=0, ha="right", va="center")
-        ax.tick_params(axis="y", labelsize=6)
-        # guard the all-zero case: an action no agent ever takes would collapse the axis
-        ax.set_ylim(0, max(row.max() * 1.25, 1e-6))
-        ax.grid(axis="y", alpha=0.25, lw=0.5)
-        ax.set_axisbelow(True)
-        for side in ("top", "right"):
-            ax.spines[side].set_visible(False)
-
-    axes[-1].set_xticks(np.arange(0, NUM_AGENTS, 5))
-    axes[-1].tick_params(axis="x", labelsize=7)
-    axes[-1].set_xlabel("component", fontsize=8)
-    axes[0].set_title(
-        f"Action density per component ({NUM_EPISODES} rollouts), % of steps",
-        fontsize=9,
-        weight="bold",
-        loc="left",
-    )
-
-    fig.tight_layout(h_pad=0.4)
-    if save_kwargs is not None:
-        fig.savefig(**save_kwargs)
-    plt.show()
