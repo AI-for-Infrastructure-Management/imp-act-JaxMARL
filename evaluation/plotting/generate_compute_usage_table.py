@@ -1,4 +1,4 @@
-"""Build the GPU compute-usage table (paper appendix, Table 24) from cached wandb data.
+"""Build the GPU compute-usage table (paper appendix) from cached wandb data.
 
 Reads the CSV that evaluation/plotting/data/compute_accounting.ipynb exports
 (evaluation/plotting/data/compute_usage.csv) -- this script never talks to wandb. That
@@ -9,9 +9,7 @@ The CSV already holds the filtered WORKING SET, not every raw fetched run: the n
 keeps only the 50M-timestep budget for VDN/QMIX final runs (their 20M runs are an
 earlier, superseded budget -- tuning keeps its own 20M budget untouched), and only
 finished runs. This script just loads it and computes GPU hours = wall-clock runtime
-(summary["_runtime"], fetched by the notebook) x GPU count, summed per cell. VDN-BA is
-deferred for now and kept as a clearly marked placeholder column so the layout matches
-the paper.
+(summary["_runtime"], fetched by the notebook) x GPU count, summed per cell.
 
 The checks and the table always print to the console as plain markdown -- there is no
 flag that silences this, and the raw LaTeX itself is never dumped to the console. The
@@ -52,7 +50,6 @@ LATEX_PATH = Path(__file__).resolve().parent / "tables" / "compute_usage.tex"
 ALG_COL_ORDER = [
     "pqn_rnn",
     "vdn_rnn",
-    "vdn_ba_rnn",
     "qmix_rnn",
     "mappo_rnn",
     "ippo_rnn",
@@ -60,12 +57,10 @@ ALG_COL_ORDER = [
 ALG_LABEL = {
     "pqn_rnn": "PQN-VDN",
     "vdn_rnn": "VDN",
-    "vdn_ba_rnn": "VDN-BA",
     "qmix_rnn": "QMIX",
     "mappo_rnn": "MAPPO",
     "ippo_rnn": "IPPO",
 }
-DEFERRED_ALGS = {"vdn_ba_rnn"}  # ignored for now -> placeholder column
 
 # Final-run environment configurations, in paper/figure order. Paper display names
 # double as the \texttt{} labels in the table.
@@ -103,12 +98,10 @@ KEEP_50M_ALGS = {"vdn_rnn", "qmix_rnn"}
 FINAL_TT_KEEP = 50_000_000
 
 # Cell markers -- must render distinctly, they mean different things.
-MARK_DEFERRED = "‡"  # double dagger: VDN-BA, deferred
-MARK_STRUCT_NA = "n/a"  # structurally empty (e.g. VDN-BA has no pilot/tuning stage)
 MARK_NORUN = "—"  # em dash: no matching run found
 
 # Internal cell-token sentinels (distinct from the display markers above).
-NORUN, NA, DEFERRED, BLANK = "NORUN", "NA", "DEFERRED", "BLANK"
+NORUN, BLANK = "NORUN", "BLANK"
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +175,6 @@ def check_runs_per_cell(work):
     env_rows = [ENV_PAPER[v] for v in ENV_ORDER]
     row_order = [ROW_PILOT, ROW_TUNING, *env_rows]
     present_rows = [r for r in row_order if r in set(work["row_key"])]
-    train_cols = [c for c in ALG_COL_ORDER if c not in DEFERRED_ALGS]
     count_pivot = (
         work[work["col"].isin(ALG_COL_ORDER)]
         .pivot_table(
@@ -192,7 +184,7 @@ def check_runs_per_cell(work):
             aggfunc="count",
             fill_value=0,
         )
-        .reindex(index=present_rows, columns=train_cols, fill_value=0)
+        .reindex(index=present_rows, columns=ALG_COL_ORDER, fill_value=0)
         .rename(columns=ALG_LABEL)
     )
     print("\n(1) runs per cell (finished)")
@@ -259,7 +251,6 @@ def show_device_table(work):
 # Table construction -- shared by the console and LaTeX renderings
 # ---------------------------------------------------------------------------
 def build_table(work):
-    train_algs = [a for a in ALG_COL_ORDER if a not in DEFERRED_ALGS]
     hours, counts = defaultdict(float), defaultdict(int)
     for _, r in work.iterrows():
         if r["col"] in ALG_COL_ORDER and r["row_key"] is not None:
@@ -274,15 +265,12 @@ def build_table(work):
     ]
 
     def data_cell(row_key, alg):
-        if alg in DEFERRED_ALGS:
-            # VDN-BA has no pilot/tuning stage (structural n/a); its final rows are deferred.
-            return NA if row_key in (ROW_PILOT, ROW_TUNING) else DEFERRED
         if counts[(row_key, alg)] == 0:
             return NORUN
         return hours[(row_key, alg)]
 
     def row_total(row_key):
-        return sum(hours[(row_key, a)] for a in train_algs)
+        return sum(hours[(row_key, a)] for a in ALG_COL_ORDER)
 
     groups = [
         ("Pilot runs", "pilot", [(pilot_maps, ROW_PILOT)]),
@@ -291,14 +279,10 @@ def build_table(work):
     ]
     env_rows = [ENV_PAPER[v] for v in ENV_ORDER]
     col_tot = {
-        a: (
-            DEFERRED
-            if a in DEFERRED_ALGS
-            else sum(hours[(rk, a)] for rk in [ROW_PILOT, ROW_TUNING, *env_rows])
-        )
+        a: sum(hours[(rk, a)] for rk in [ROW_PILOT, ROW_TUNING, *env_rows])
         for a in ALG_COL_ORDER
     }
-    grand_total = sum(v for v in col_tot.values() if isinstance(v, float))
+    grand_total = sum(col_tot.values())
     final_total = work[work["stage"] == "final"]["gpu_hours"].sum()
     return {
         "groups": groups,
@@ -314,7 +298,7 @@ def build_table(work):
 # Console / text rendering
 # ---------------------------------------------------------------------------
 def format_report(table):
-    marker = {NORUN: MARK_NORUN, NA: MARK_STRUCT_NA, DEFERRED: MARK_DEFERRED, BLANK: ""}
+    marker = {NORUN: MARK_NORUN, BLANK: ""}
 
     def cell(tok):
         return f"{tok:.2f}" if isinstance(tok, (int, float)) else marker[tok]
@@ -346,7 +330,6 @@ def format_report(table):
     blocks.append(
         f"final runs : {table['final_total']:.2f} GPU-h ({table['final_total'] / 24:.2f} GPU-days)\n"
         f"grand total: {table['grand_total']:.2f} GPU-h ({table['grand_total'] / 24:.2f} GPU-days)"
-        "  (excl. VDN-BA)"
     )
     return "\n\n".join(blocks)
 
@@ -359,7 +342,7 @@ def show_console(table):
 # LaTeX
 # ---------------------------------------------------------------------------
 def write_latex(table):
-    tex_marker = {NORUN: "---", NA: "n/a", DEFERRED: r"\ddag", BLANK: ""}
+    tex_marker = {NORUN: "---", BLANK: ""}
 
     def tex_cell(tok):
         return f"{tok:.2f}" if isinstance(tok, (int, float)) else tex_marker[tok]
