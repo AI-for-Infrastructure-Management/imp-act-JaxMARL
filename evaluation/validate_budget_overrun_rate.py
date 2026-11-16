@@ -9,17 +9,14 @@ Usage (from evaluation/):
 """
 
 import argparse
-import os
 
 import jax
 import numpy as np
-import pandas as pd
 from omegaconf import OmegaConf
+from released_data import best_checkpoint
 from vdn_rnn_road_env import make_get_rollout_data
 
 from jaxmarl.wrappers.baselines import load_params
-
-CHECKPOINT_ROOT = "data/best_checkpoints"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--map", default="Cologne-v1")
@@ -28,15 +25,12 @@ parser.add_argument("--episodes", type=int, default=1000)
 parser.add_argument("--seed", type=int, default=0)
 args = parser.parse_args()
 
-manifest = pd.read_csv(f"{CHECKPOINT_ROOT}/best_checkpoints.csv")
-best = manifest[
-    (manifest["map_name"] == args.map) & (manifest["algorithm"] == args.alg)
-].iloc[0]
-run_dir = os.path.join(CHECKPOINT_ROOT, best["run_dir"])
-print(f"{args.map} / {args.alg}: {best['run_dir']}, checkpoint {best['checkpoint_id']}")
+# The best final-run checkpoint (rank 1), from the Zenodo release
+best, run_dir = best_checkpoint(args.map, args.alg)
+print(f"{args.map} / {args.alg}: seed {best['seed']}, checkpoint {best['checkpoint_step']}")
 
-config = OmegaConf.to_container(OmegaConf.load(os.path.join(run_dir, "config.yaml")))
-params = load_params(os.path.join(CHECKPOINT_ROOT, best["local_path"]))
+config = OmegaConf.to_container(OmegaConf.load(run_dir / "config.yaml"))
+params = load_params(str(next((run_dir / "checkpoints").glob("*/checkpoint_*.safetensors"))))
 
 rollout = jax.jit(make_get_rollout_data(config, args.episodes))
 _, _, _, _, infos = rollout(jax.random.PRNGKey(args.seed), params)

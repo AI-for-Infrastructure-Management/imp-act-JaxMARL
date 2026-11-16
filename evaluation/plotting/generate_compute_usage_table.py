@@ -1,9 +1,8 @@
 """Build the GPU compute-usage table (paper appendix) from cached wandb data.
 
-Reads the CSV that evaluation/plotting/data/compute_accounting.ipynb exports
-(evaluation/plotting/data/compute_usage.csv) -- this script never talks to wandb. That
-notebook is the only place that does; re-run it to refresh the CSV as the experiments
-progress, then re-run this script to regenerate the table.
+Reads evaluation/plotting/data/compute_usage.csv, which is released on Zenodo and
+downloaded when missing -- this script never talks to wandb. The CSV is exported by the
+local evaluation/plotting/data/compute_accounting.ipynb, the only place that does.
 
 The CSV already holds the filtered WORKING SET, not every raw fetched run: the notebook
 keeps only the 50M-timestep budget for VDN/QMIX final runs (their 20M runs are an
@@ -21,6 +20,7 @@ Usage:
 """
 
 import argparse
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -41,6 +41,9 @@ def find_repo_root(start):
 
 REPO_ROOT = find_repo_root(Path(__file__).resolve())
 CSV_PATH = REPO_ROOT / "evaluation" / "plotting" / "data" / "compute_usage.csv"
+# The CSV is released on Zenodo; evaluation/released_data.py downloads it when missing
+sys.path.insert(0, str(REPO_ROOT / "evaluation"))
+from released_data import download  # noqa: E402
 LATEX_PATH = Path(__file__).resolve().parent / "tables" / "compute_usage.tex"
 
 
@@ -114,10 +117,7 @@ def load_runs(csv_path):
     rather than silently re-filtering -- a mismatch means the CSV is stale or was hand-edited.
     """
     if not csv_path.exists():
-        raise FileNotFoundError(
-            f"{csv_path} not found -- run evaluation/plotting/data/compute_accounting.ipynb "
-            "first to fetch run data from wandb and export it."
-        )
+        download(csv_path.name, csv_path)
     df = pd.read_csv(csv_path)
     df["runtime_h"] = df["runtime_s"] / 3600.0
     df["gpu_count_eff"] = df["gpu_count"].fillna(1).astype(int)
@@ -180,7 +180,7 @@ def check_runs_per_cell(work):
         .pivot_table(
             index="row_key",
             columns="col",
-            values="run_id",
+            values="stage",  # any column: counts the runs per cell
             aggfunc="count",
             fill_value=0,
         )
