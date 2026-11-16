@@ -1,12 +1,11 @@
-import time
-import jax
-import jax.numpy as jnp
 import logging
-import numpy as np
-from numbers import Number
 import time
+from numbers import Number
 
 import hydra
+import jax
+import jax.numpy as jnp
+import numpy as np
 from omegaconf import DictConfig, OmegaConf
 
 from jaxmarl import make
@@ -22,23 +21,28 @@ if DEBUG:
     jax.config.update("jax_disable_jit", True)
     jax.config.update("jax_check_tracer_leaks", True)
 
+
 def get_policy_do_nothing(params=None):
     """Returns a do_nothing policy function.
-    
+
     Args:
         params: Not used for this policy, included for consistency.
     """
+
     def policy(key, state, obs, env):
         """Policy that does nothing."""
-        return {agent: 0 for agent in obs.keys()}
+        return {agent: 0 for agent in obs}
+
     return policy
+
 
 def get_policy_random(params=None):
     """Returns a random policy function.
-    
+
     Args:
         params: Not used for this policy, included for consistency.
     """
+
     def policy(key, state, obs, env):
         """Policy that picks a random action (0, 1, or 2) for each agent."""
         num_agents = len(obs)
@@ -46,11 +50,13 @@ def get_policy_random(params=None):
         keys = jax.random.split(key, num_agents)
         actions = jax.vmap(lambda k: jax.random.randint(k, (), 0, num_actions))(keys)
         return {f"agent_{i}": actions[i] for i in range(num_agents)}
+
     return policy
+
 
 def get_policy_segment_based_heuristic(params):
     """Returns a segment_based_heuristic policy function with configurable parameters.
-    
+
     Args:
         params: Dictionary containing:
             - inspection_interval: Timestep interval for inspection (action 1)
@@ -63,12 +69,12 @@ def get_policy_segment_based_heuristic(params):
         raise ValueError(
             "Both 'inspection_interval' and 'repair_threshold' must be provided in params."
         )
-    
+
     def policy(key, state, obs, env):
         """Policy that inspects at specified intervals and repairs when observation exceeds threshold."""
         road_env = env._env.env
         road_env_state = state.env_state
-        
+
         tstep = state.env_state.timestep
         obs_insp = state.env_state.observation
         # Step 1: Initialize with default action 0
@@ -80,11 +86,13 @@ def get_policy_segment_based_heuristic(params):
 
         actions_dict = {f"agent_{i}": actions[i] for i in range(env.num_agents)}
         return actions_dict
+
     return policy
+
 
 def get_budget_prioritized_policy(policy, params):
     """Returns a prioritized policy function with configurable parameters.
-    
+
     Args:
         params: Dictionary containing:
             - inspection_interval: Timestep interval for inspection (action 1)
@@ -104,8 +112,9 @@ def get_budget_prioritized_policy(policy, params):
     if params.get("prioritization_key") == "list":
         prioritization_list = jnp.array(params.get("prioritization_list"))
         if len(prioritization_list) == 0:
-            raise ValueError("Prioritization list cannot be empty when using 'list' key.")
-
+            raise ValueError(
+                "Prioritization list cannot be empty when using 'list' key."
+            )
 
     def prioritized_policy(key, state, obs, env):
         """Policy that inspects at specified intervals and repairs when observation exceeds threshold."""
@@ -130,9 +139,9 @@ def get_budget_prioritized_policy(policy, params):
 
         # Make sure real damage state cannot be used as info
         road_env_state = road_env_state.replace(
-            damage_state = jnp.zeros_like(road_env_state.damage_state),
+            damage_state=jnp.zeros_like(road_env_state.damage_state),
         )
-        
+
         do_nothing_forced_repair_mask = jnp.full_like(forced_repair_mask, False)
         upfront_cost = road_env._get_budget_action_cost(
             road_env_state, do_nothing_action, do_nothing_forced_repair_mask
@@ -142,7 +151,9 @@ def get_budget_prioritized_policy(policy, params):
         )
 
         # Calculate adjusted costs
-        action_cost = road_env._get_budget_action_cost(road_env_state, action, forced_repair_mask)
+        action_cost = road_env._get_budget_action_cost(
+            road_env_state, action, forced_repair_mask
+        )
         adjusted_cost = action_cost - upfront_cost
 
         remaining_budget = (
@@ -164,11 +175,15 @@ def get_budget_prioritized_policy(policy, params):
                 priorities = jax.random.uniform(prio_key, shape=action.shape)
             elif params["prioritization_key"] == "list":
                 if len(prioritization_list) != len(action):
-                    raise ValueError("Length of prioritization list must match number of agents.")
+                    raise ValueError(
+                        "Length of prioritization list must match number of agents."
+                    )
                 priorities = prioritization_list
             else:
-                raise ValueError(f"Unknown prioritization key: {params['prioritization_key']}")
-            
+                raise ValueError(
+                    f"Unknown prioritization key: {params['prioritization_key']}"
+                )
+
             if params.get("prioritization_sign") == "negative":
                 priorities = -priorities
 
@@ -197,6 +212,7 @@ def get_budget_prioritized_policy(policy, params):
         )
 
         if top_k_value is not None:
+
             def apply_top_k_constraint():
                 # Get indices of top_k priorities
                 if params["prioritization_key"] == "cost":
@@ -209,11 +225,15 @@ def get_budget_prioritized_policy(policy, params):
                     priorities = jax.random.uniform(prio_key, shape=action.shape)
                 elif params["prioritization_key"] == "list":
                     if len(prioritization_list) != len(action):
-                        raise ValueError("Length of prioritization list must match number of agents.")
+                        raise ValueError(
+                            "Length of prioritization list must match number of agents."
+                        )
                     priorities = prioritization_list
                 else:
-                    raise ValueError(f"Unknown prioritization key: {params['prioritization_key']}")
-                
+                    raise ValueError(
+                        f"Unknown prioritization key: {params['prioritization_key']}"
+                    )
+
                 if params.get("prioritization_sign") == "negative":
                     priorities = -priorities
 
@@ -238,10 +258,13 @@ def get_budget_prioritized_policy(policy, params):
 
         actions_dict = {f"agent_{i}": constrained_action[i] for i in range(len(obs))}
         return actions_dict
+
     return prioritized_policy
+
 
 def run_rollout(key, env, policy, num_steps):
     """Run a rollout in the environment."""
+
     def scan_step(carry, _):
         key, total_reward, last_obs, last_state, episodes = carry
         key, key_act = jax.random.split(key)
@@ -249,18 +272,20 @@ def run_rollout(key, env, policy, num_steps):
         key, key_step = jax.random.split(key)
         obs, state, reward, done, infos = env.step(key_step, last_state, actions)
         total_reward = total_reward + reward["__all__"]
-        episodes = jax.lax.cond( 
+        episodes = jax.lax.cond(
             done["__all__"].any(),
             lambda: episodes + 1,
             lambda: episodes,
         )
         return (key, total_reward, obs, state, episodes), (done["__all__"], infos)
-    
+
     key, key_reset = jax.random.split(key)
     obs, state = env.reset(key_reset)
-    
+
     key, key_scan = jax.random.split(key)
-    carry, (dones, infos) = jax.lax.scan(scan_step, (key_scan, 0.0, obs, state, 0), None, length=num_steps)
+    carry, (dones, infos) = jax.lax.scan(
+        scan_step, (key_scan, 0.0, obs, state, 0), None, length=num_steps
+    )
     _, total_reward, _, _, episodes = carry
     log_wrapper_return = jnp.nanmean(
         jnp.where(
@@ -271,10 +296,11 @@ def run_rollout(key, env, policy, num_steps):
     )
     return total_reward / episodes, dones.any(), log_wrapper_return
 
+
 def make_get_rollout_data(config):
 
     # Environment
-    env = make('road_env', map_name=config['map'], record_rollout=True)
+    env = make("road_env", map_name=config["map"], record_rollout=True)
     env = LogWrapper(env)
 
     # Policy
@@ -282,6 +308,9 @@ def make_get_rollout_data(config):
     # Extract policy parameters if they exist
     policy_params = config.get("policy_parameters", None)
     policy = policy_factory(policy_params)
+    # Same budget prioritization as the evaluation in main()
+    if policy_params and policy_params.get("prioritization_enabled", False):
+        policy = get_budget_prioritized_policy(policy, policy_params)
 
     @jax.vmap
     @jax.jit
@@ -303,13 +332,20 @@ def make_get_rollout_data(config):
         # 1. Rollout is limited to max_timesteps
         # 2. To include last step, env_step is used instead of step (which would
         # otherwise reset the env when done)
-        carry, (env_state, actions, reward, infos) = jax.lax.scan(scan_step, init_carry, None, length=env.env.max_timesteps)
+        carry, (env_state, actions, reward, infos) = jax.lax.scan(
+            scan_step, init_carry, None, length=env.env.max_timesteps
+        )
 
         return init_state, env_state, actions, reward, infos
 
     return get_rollout_data
 
-@hydra.main(config_path="config/heuristics/", config_name="toy_example_v2_heuristic", version_base=None)
+
+@hydra.main(
+    config_path="config/heuristics/",
+    config_name="toy_example_v2_heuristic",
+    version_base=None,
+)
 def main(cfg: DictConfig):
     # Log the configuration
     print(f"Configuration:\n{OmegaConf.to_yaml(OmegaConf.to_container(cfg))}")
@@ -321,7 +357,7 @@ def main(cfg: DictConfig):
     #### Inputs
     MAP_NAME = cfg.map
     policy_name = cfg.policy
-    
+
     # Get policy with parameters
     policy_factory = globals()[f"get_policy_{policy_name}"]
     # Extract policy parameters (flat, under policy_parameters)
@@ -339,7 +375,7 @@ def main(cfg: DictConfig):
     key = jax.random.PRNGKey(0)
     key, key_rollout = jax.random.split(key)
     # Initialise environment.
-    env = make('road_env', map_name=MAP_NAME)
+    env = make("road_env", map_name=MAP_NAME)
     env = LogWrapper(env)
 
     jit_vmap_rollout = jax.jit(
@@ -348,7 +384,7 @@ def main(cfg: DictConfig):
             in_axes=(0, None, None, None),
             out_axes=0,
         ),
-        static_argnums=(1,2,3),
+        static_argnums=(1, 2, 3),
     )
 
     keys = jax.random.split(key_rollout, NUM_ENVS)
@@ -377,16 +413,21 @@ def main(cfg: DictConfig):
     log.info(f"Std reward: {std_reward / NORM_CONSTANT:.6f}")
 
     if not jnp.allclose(mean_reward, log_wrapper_mean_reward):
-        log.warning("Warning: Mean results from the heuristic policy and log wrapper do not match.")
+        log.warning(
+            "Warning: Mean results from the heuristic policy and log wrapper do not match."
+        )
 
     if not jnp.allclose(std_reward, log_wrapper_std_reward):
-        log.warning("Warning: Std results from the heuristic policy and log wrapper do not match.")
-    
+        log.warning(
+            "Warning: Std results from the heuristic policy and log wrapper do not match."
+        )
+
     if not dones.any():
-        log.warning(f"Warning: No episodes ended in a done state.")
+        log.warning("Warning: No episodes ended in a done state.")
 
     if cfg.plot_histogram:
         import matplotlib.pyplot as plt
+
         plt.hist(results, bins=100)
         plt.xlabel("Total reward")
         plt.ylabel("Frequency")
