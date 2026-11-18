@@ -1,7 +1,11 @@
+import sys
+from pathlib import Path
+
 import jax
 import jax.numpy as jnp
 
-from heuristic_evaluation_road_env import make_get_rollout_data
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evaluation"))  # *_road_env.py modules
+from heuristic_evaluation_road_env import make_get_rollout_data  # noqa: E402
 
 from jaxmarl import make
 from jaxmarl.wrappers.baselines import (

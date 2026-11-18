@@ -4,17 +4,21 @@ Validates the claim in the results section: "In evaluations of the best VDN poli
 in Cologne, budget overruns triggered this mechanism in approximately X% of
 timesteps on average."
 
-Usage (from evaluation/):
+Usage (from results/):
     python validate_budget_overrun_rate.py [--map Cologne-v1] [--alg vdn_rnn] [--episodes 1000]
 """
 
 import argparse
+import sys
+from pathlib import Path
 
 import jax
 import numpy as np
 from omegaconf import OmegaConf
 from released_data import best_checkpoint
-from vdn_rnn_road_env import make_get_rollout_data
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evaluation"))  # *_road_env.py modules
+from vdn_rnn_road_env import make_get_rollout_data  # noqa: E402
 
 from jaxmarl.wrappers.baselines import load_params
 

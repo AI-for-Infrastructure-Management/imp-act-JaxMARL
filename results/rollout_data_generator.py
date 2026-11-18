@@ -1,11 +1,16 @@
 import copy
 import os
+import sys
+from pathlib import Path
+
 import jax
 import jax.numpy as jnp
 from omegaconf import OmegaConf
 
 import jaxmarl
 from jaxmarl.wrappers.baselines import CTRolloutManager
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evaluation"))  # *_road_env.py modules
 
 
 class RolloutDataGenerator:

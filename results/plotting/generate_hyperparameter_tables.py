@@ -4,15 +4,15 @@ For each algorithm (VDN, QMIX, PQN-VDN, MAPPO, IPPO) this pulls together three
 stages of a config -- the convergence pilot, the Cologne-v1 tuning-sweep search
 space, and the selected final-run config -- into one four-column table
 (Hyperparameter | Pilot | Search space | Selected) and writes it out as a
-LaTeX booktabs table, written to evaluation/plotting/tables/hyperparameter_tables.tex.
+LaTeX booktabs table, written to results/plotting/tables/hyperparameter_tables.tex.
 No number is hardcoded here, so re-running this after a config change
 regenerates correct tables. The console preview shows the same values as the
 .tex file, rendered as readable Unicode math (e.g. "5 x 10^-5") instead of
 the raw LaTeX source.
 
 Usage:
-    python evaluation/plotting/generate_hyperparameter_tables.py
-    python evaluation/plotting/generate_hyperparameter_tables.py --show none
+    python results/plotting/generate_hyperparameter_tables.py
+    python results/plotting/generate_hyperparameter_tables.py --show none
 """
 
 import argparse

@@ -13,9 +13,9 @@ from pathlib import Path
 ZENODO_FILES_URL = "https://zenodo.org/records/24175731/files"
 
 # Relative to the working directory, so printed paths do not reveal the local file system
-EVALUATION_DIR = Path(os.path.relpath(Path(__file__).resolve().parent))
-DATA_DIR = EVALUATION_DIR / "plotting" / "data"
-CHECKPOINT_DIR = EVALUATION_DIR / "data" / "zenodo_checkpoints"
+RESULTS_DIR = Path(os.path.relpath(Path(__file__).resolve().parent))
+DATA_DIR = RESULTS_DIR / "plotting" / "data"
+CHECKPOINT_DIR = RESULTS_DIR / "data" / "zenodo_checkpoints"
 
 
 def download(name, path):

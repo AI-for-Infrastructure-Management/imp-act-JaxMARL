@@ -10,6 +10,7 @@ __pycache__/
 docker/*
 *.pickle
 results/
+!/results/
 tmp/
 *-checkpoint.py
 wandb/
@@ -18,7 +19,7 @@ models/
 *.csv*
 !results.ipynb
 !Figure_8.ipynb
-!evaluation/hyperparameter_tuning_analysis.ipynb
+!results/hyperparameter_tuning_analysis.ipynb
 evaluation/data
 
 # Cluster-specific tuning workflow, kept locally

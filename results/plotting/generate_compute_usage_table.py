@@ -1,8 +1,8 @@
 """Build the GPU compute-usage table (paper appendix) from cached wandb data.
 
-Reads evaluation/plotting/data/compute_usage.csv, which is released on Zenodo and
+Reads results/plotting/data/compute_usage.csv, which is released on Zenodo and
 downloaded when missing -- this script never talks to wandb. The CSV is exported by the
-local evaluation/plotting/data/compute_accounting.ipynb, the only place that does.
+local results/plotting/data/compute_accounting.ipynb, the only place that does.
 
 The CSV already holds the filtered WORKING SET, not every raw fetched run: the notebook
 keeps only the 50M-timestep budget for VDN/QMIX final runs (their 20M runs are an
@@ -12,11 +12,11 @@ finished runs. This script just loads it and computes GPU hours = wall-clock run
 
 The checks and the table always print to the console as plain markdown -- there is no
 flag that silences this, and the raw LaTeX itself is never dumped to the console. The
-LaTeX is written to evaluation/plotting/tables/compute_usage.tex.
+LaTeX is written to results/plotting/tables/compute_usage.tex.
 
 Usage:
-    python evaluation/plotting/generate_compute_usage_table.py
-    python evaluation/plotting/generate_compute_usage_table.py --csv path/to/other.csv
+    python results/plotting/generate_compute_usage_table.py
+    python results/plotting/generate_compute_usage_table.py --csv path/to/other.csv
 """
 
 import argparse
@@ -40,9 +40,9 @@ def find_repo_root(start):
 
 
 REPO_ROOT = find_repo_root(Path(__file__).resolve())
-CSV_PATH = REPO_ROOT / "evaluation" / "plotting" / "data" / "compute_usage.csv"
-# The CSV is released on Zenodo; evaluation/released_data.py downloads it when missing
-sys.path.insert(0, str(REPO_ROOT / "evaluation"))
+CSV_PATH = REPO_ROOT / "results" / "plotting" / "data" / "compute_usage.csv"
+# The CSV is released on Zenodo; results/released_data.py downloads it when missing
+sys.path.insert(0, str(REPO_ROOT / "results"))
 from released_data import download  # noqa: E402
 LATEX_PATH = Path(__file__).resolve().parent / "tables" / "compute_usage.tex"
 
@@ -410,7 +410,7 @@ def main():
         "--csv",
         type=Path,
         default=CSV_PATH,
-        help="input CSV exported by evaluation/plotting/data/compute_accounting.ipynb "
+        help="input CSV exported by results/plotting/data/compute_accounting.ipynb "
         "(default: %(default)s)",
     )
     args = parser.parse_args()
