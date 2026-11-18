@@ -56,6 +56,8 @@ algs = [
   "omegaconf>=2.3.0",
   "pettingzoo>=1.24.3",
   "tqdm>=4.66.0",
+  "pyarrow",
+  "seaborn",
 ]
 dev = [
   "pytest",
