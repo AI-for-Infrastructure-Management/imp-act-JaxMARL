@@ -29,7 +29,9 @@ from common import (
     GOLD,
     PLOT_PARAMS,
     RELATIVE_PERFORMANCE_LABEL,
+    ROLLOUT_TIMES,
     TEAL,
+    VDN_TRAINING_TIMES,
     baseline_values,
     best_checkpoint,
     best_per_run,
@@ -212,7 +214,7 @@ def plot_baseline_line(ax, baseline_value):
         color="red",
         linestyle="-",
         linewidth=1,
-        label="Heuristic $\\text{H}_\\text{PS}$",
+        label="Prioritized Heuristic $\\text{H}_\\text{PS}$",
     )
 
     if abs(baseline_value) >= 1e9:
@@ -802,15 +804,6 @@ def create_training_curves(
     print(f"Figures saved to {FIGURES_DIR}")
 
 
-# Wall-clock time (s) for 1,000 rollout episodes (Appendix D, Table "Speedup comparison")
-ROLLOUT_TIMES = {
-    "ToyExample-v2": {"numpy": 77.1, "numpy_mp": 7.8, "jax": 7.0},
-    "Cologne-v1": {"numpy": 540.0, "numpy_mp": 47.2, "jax": 7.0},
-    "CologneBonnDusseldorf-v1": {"numpy": 6301.3, "numpy_mp": 481.8, "jax": 26.4},
-}
-
-# End-to-end VDN training on CologneBonnDusseldorf (Appendix D): time (s) to 58,752,000 steps
-VDN_TRAINING_TIMES = {"numpy_epymarl": 1_987_397, "jax_jaxmarl": 21_952}
 
 
 def load_vdn_runs(env_name):
@@ -943,7 +936,7 @@ def box_legend(ax, loc, ncol=2):
             mlines.Line2D([], [], color="0.25", linewidth=1, marker="|", markersize=5),
         ],
         labels=[
-            "Heuristic $\\text{H}_\\text{PS}$",
+            "Prioritized Heuristic $\\text{H}_\\text{PS}$",
             "Box: 25th-75th percentile",
             "Line: median",
             "Whiskers: min / max",
@@ -1120,7 +1113,7 @@ def create_vdn_tuning_figure(
             "Line: median",
             "Whiskers: min / max",
             "Seed",
-            "Heuristic $\\text{H}_\\text{PS}$",
+            "Prioritized Heuristic $\\text{H}_\\text{PS}$",
         ],
         loc="lower left",
         bbox_to_anchor=(0, 0.06),

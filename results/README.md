@@ -16,8 +16,7 @@ checkpoints and run considerably faster on a GPU. To reproduce the remaining fig
 the rollouts, we provide the `--skip-figure-11` flag. The notebooks are run from this folder
 (`cd results`).
 
-In addition, `create_figures.py` creates `Extra_Figure_*.pdf` and `create_tables.py` creates
-`results_table.tex`, which are not used in the paper.
+In addition, `create_figures.py` creates `Extra_Figure_*.pdf`, which are not used in the paper.
 
 ## Files
 
@@ -25,7 +24,7 @@ In addition, `create_figures.py` creates `Extra_Figure_*.pdf` and `create_tables
 |---|---|
 | `common.py` | Paths, Zenodo downloads (`data_file`, `best_checkpoint`), the comparison protocol, algorithm names and the plot style |
 | `create_figures.py` | Figures 3–11 |
-| `create_tables.py` | Tables 1 and 14–24; `--only {results,hyperparameters,compute}` builds one group |
+| `create_tables.py` | Tables 1, 12 and 14–24; `--only {results,hyperparameters,compute}` builds one group |
 | `get_and_plot_rollouts.py` | Rollouts of a released checkpoint (`RolloutDataGenerator`) or of the heuristic (`HeuristicRolloutDataGenerator`), and plots of an episode (`RolloutPlotter`) |
 | `validate_budget_overrun_rate.py` | Share of timesteps in which the budget constraint changes the policy's actions |
 | `nb_rollout_data.ipynb` | Episode costs, constraints, actions and single-episode trajectories of a policy |

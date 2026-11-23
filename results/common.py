@@ -145,8 +145,19 @@ ALGORITHM_NAMES = {
     "pqn_rnn": "PQN-VDN",
     "ippo_rnn": "IPPO",
     "mappo_rnn": "MAPPO",
-    "vdn_ba_rnn": "VDN-BA",
+    "vdn_ba_rnn": r"VDN$_\text{BA}$",
 }
+
+# Measured timings, shared by Figure 3 (create_figures.py) and Table 12 (create_tables.py)
+# Wall-clock time (s) for 1,000 rollout episodes (Appendix D, Table 12)
+ROLLOUT_TIMES = {
+    "ToyExample-v2": {"numpy": 77.1, "numpy_mp": 7.8, "jax": 7.0},
+    "Cologne-v1": {"numpy": 540.0, "numpy_mp": 47.2, "jax": 7.0},
+    "CologneBonnDusseldorf-v1": {"numpy": 6301.3, "numpy_mp": 481.8, "jax": 26.4},
+}
+
+# End-to-end VDN training on CologneBonnDusseldorf (Appendix D): time (s) to 58,752,000 steps
+VDN_TRAINING_TIMES = {"numpy_epymarl": 1_987_397, "jax_jaxmarl": 21_952}
 
 # Budgets of the constrained scenarios from the imp-act presets (budget_amount)
 ENV_BUDGETS = {

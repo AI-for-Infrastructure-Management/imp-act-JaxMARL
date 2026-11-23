@@ -8,10 +8,12 @@ Hyperparameters (Tables 14-18), straight from the repo's YAML configs. For each 
 (VDN, QMIX, PQN-VDN, MAPPO, IPPO) this pulls together three stages of a config -- the
 convergence pilot, the Cologne-v1 tuning-sweep search space, and the selected final-run
 config -- into one four-column table (Hyperparameter | Pilot | Search space | Selected),
-written as a LaTeX booktabs table to tables/hyperparameter_tables.tex. No number is
+written as a LaTeX booktabs table to tables/Table_14_18_Hyperparameters.tex. No number is
 hardcoded here, so re-running this after a config change regenerates correct tables. The
 console preview shows the same values as the .tex file, rendered as readable Unicode math
 (e.g. "5 x 10^-5") instead of the raw LaTeX source.
+
+Rollout speedup (Table 12), from the timings in common.py.
 
 Compute usage (Table 19). Reads data/compute_usage.csv, which is released on Zenodo and
 downloaded when missing -- this script never talks to wandb. The CSV is exported by the
@@ -25,7 +27,7 @@ finished runs. This script just loads it and computes GPU hours = wall-clock run
 
 The checks and the table always print to the console as plain markdown -- there is no
 flag that silences this, and the raw LaTeX itself is never dumped to the console. The
-LaTeX is written to tables/compute_usage.tex.
+LaTeX is written to tables/Table_19_Compute_Usage.tex.
 
 The released data files are downloaded from Zenodo when missing.
 
@@ -50,6 +52,7 @@ from common import (
     ALGORITHM_NAMES,
     BASELINE_HEURISTIC,
     REPO_ROOT,
+    ROLLOUT_TIMES,
     TABLES_DIR,
     baseline_values,
     best_per_run,
@@ -93,7 +96,18 @@ def format_heuristic_value(val):
     return f"{val/1e6:.2f}\\text{{M}}"
 
 
-def wrap_table(latex_lines, caption, label, placement, arraystretch=1.25):
+def paper_repair_threshold(params, num_damage_states=5):
+    """Repair threshold in the paper's numbering (5 = very good, ..., 1 = poor).
+
+    The heuristic repairs when the observed index (0 = very good) is >= the stored threshold,
+    i.e. when the paper's damage state is <= num_damage_states - threshold.
+    """
+    if "repair_threshold" not in params:
+        return "--"
+    return num_damage_states - int(params["repair_threshold"])
+
+
+def wrap_table(latex_lines, caption, label, placement, arraystretch=1.25, fill_width=False):
     """Wraps a tabular in a table environment (shrunk to the text width if wider), with shared font and spacing."""
     return [
         r"\begin{table}[" + placement + "]",
@@ -104,145 +118,15 @@ def wrap_table(latex_lines, caption, label, placement, arraystretch=1.25):
         r"  \setlength{\tabcolsep}{4pt}",
         r"  \renewcommand{\arraystretch}{" + str(arraystretch) + "}",
         # Shrink to the text width if wider, never enlarge
-        r"  \resizebox{\ifdim\width>\textwidth\textwidth\else\width\fi}{!}{%",
+        (
+            r"  \resizebox{\textwidth}{!}{%"
+            if fill_width
+            else r"  \resizebox{\ifdim\width>\textwidth\textwidth\else\width\fi}{!}{%"
+        ),
         *latex_lines,
         r"  }",
         r"\end{table}",
     ]
-
-
-def generate_latex_table(
-    data,
-    baseline_heuristic_values,
-    envs_to_plot=None,
-    output_filename="results_table.tex",
-):
-    """Generates LaTeX table."""
-    if envs_to_plot is None:
-        envs_to_plot = ["ToyExample-v2", "Cologne-v1", "CologneBonnDusseldorf-v1"]
-
-    main_algorithms = ["vdn_rnn", "qmix_rnn", "pqn_rnn", "mappo_rnn", "ippo_rnn"]
-    baseline_alg = "vdn_ba_rnn"
-
-    latex_lines = []
-    latex_lines.append(r"  \begin{tabular}{llrc}")
-    latex_lines.append(r"    \toprule")
-    latex_lines.append(r"    \thead{\textbf{Environment}} & \thead{\textbf{Algorithm}}")
-    latex_lines.append(r"    & \thead{\textbf{${\Delta \bar{R}^{\pi}_0}$}} ")
-    latex_lines.append(r"    & \thead{\textbf{95\% CI}} \\")
-    latex_lines.append(r"    \midrule")
-
-    for env in envs_to_plot:
-        # Calculate stats for all algorithms
-        alg_stats = {}
-        best_runs = best_per_run(data, env)
-        for alg in main_algorithms + [baseline_alg]:
-            runs = best_runs[best_runs["algorithm"] == alg]
-            if len(runs):
-                # The single best checkpoint across all runs
-                best_run = runs.loc[runs["mean_pct"].idxmax()]
-                alg_stats[alg] = {
-                    "mean": best_run["mean_pct"],
-                    "ci": (best_run["lower_ci_pct"], best_run["upper_ci_pct"]),
-                }
-            else:
-                alg_stats[alg] = {"mean": np.nan, "ci": (np.nan, np.nan)}
-
-        # Find best main algorithm
-        best_main_alg = None
-        best_main_mean = -np.inf
-        best_main_ci = None
-
-        for alg in main_algorithms:
-            if (
-                not np.isnan(alg_stats[alg]["mean"])
-                and alg_stats[alg]["mean"] > best_main_mean
-            ):
-                best_main_mean = alg_stats[alg]["mean"]
-                best_main_alg = alg
-                best_main_ci = alg_stats[alg]["ci"]
-
-        # Format environment column
-        h_val = baseline_heuristic_values[env]
-        h_str = format_heuristic_value(h_val)
-        env_display = ENV_DISPLAY_NAMES.get(env, env.replace("_", "\\_"))
-        multirow_cmd = (
-            r"\multirow{6}{*}{{\shortstack{"
-            + env_display
-            + r" \\ $\text{H}_\text{PS}="
-            + h_str
-            + r"$}}}"
-        )
-
-        # Print main algorithms
-        for i, alg in enumerate(main_algorithms):
-            row_str = ""
-            if i == 0:
-                row_str += f"    {multirow_cmd} \n    & "
-            else:
-                row_str += "    & "
-
-            alg_name = LATEX_ALGORITHM_NAMES[alg]
-            mean = alg_stats[alg]["mean"]
-            ci = alg_stats[alg]["ci"]
-
-            # Formatting mean
-            if np.isnan(mean):
-                mean_str = "--"
-                ci_str = "--"
-            else:
-                mean_str = f"{mean:+.2f}\\%"
-                if alg == best_main_alg:
-                    mean_str = r"\textbf{" + mean_str + "}"
-
-                # Check for overlap with best
-                is_star = False
-                if alg != best_main_alg and not np.isnan(mean):
-                    # Check if CI overlaps with best algorithm's CI
-                    overlap = max(ci[0], best_main_ci[0]) < min(ci[1], best_main_ci[1])
-                    if overlap:
-                        is_star = True
-
-                if is_star:
-                    mean_str = "*" + mean_str
-
-                ci_str = f"{{[{ci[0]:.2f}\\,, {ci[1]:.2f}]}}"
-
-            row_str += f"{alg_name:<8} & {mean_str:<16} & {ci_str:<18} \\\\"
-            latex_lines.append(row_str)
-
-        # Separator
-        latex_lines.append(r"    \cmidrule(lr){2-4}")
-
-        # Print baseline algorithm
-        alg = baseline_alg
-        alg_name = LATEX_ALGORITHM_NAMES[alg]
-        mean = alg_stats[alg]["mean"]
-        ci = alg_stats[alg]["ci"]
-
-        if np.isnan(mean):
-            mean_str = "--"
-            ci_str = "--"
-        else:
-            mean_str = f"{mean:+.2f}\\%"
-            ci_str = f"{{[{ci[0]:.2f}\\,, {ci[1]:.2f}]}}"
-
-        latex_lines.append(
-            f"    & {alg_name:<8} & {mean_str:<16} & {ci_str:<18}   \\\\"
-        )
-
-        if env != envs_to_plot[-1]:
-            latex_lines.append(r"    \midrule")
-        else:
-            latex_lines.append(r"    \bottomrule")
-
-    latex_lines.append(r"  \end{tabular}")
-
-    TABLES_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = TABLES_DIR / output_filename
-    with open(output_path, "w") as f:
-        f.write("\n".join(latex_lines))
-    print(f"Table saved to {output_path}")
 
 
 # Extra algorithms: shown in the main results table with an asterisk, but not considered
@@ -324,6 +208,7 @@ def generate_latex_table_scenarios(
     blocks,
     output_filename,
     scenario_header="Scenario",
+    env_header="Environment",
     caption=None,
     label=None,
     placement="h",
@@ -351,7 +236,7 @@ def generate_latex_table_scenarios(
     )
     latex_lines.append(r"    \toprule")
     latex_lines.append(
-        r"    \thead{\textbf{Environment}} & \thead{\textbf{"
+        r"    \thead{\textbf{" + env_header + r"}} & \thead{\textbf{"
         + scenario_header
         + r"}} & \thead{\textbf{$\text{H}_\text{PS}$}} & "
         + " & ".join(
@@ -683,7 +568,7 @@ def generate_heuristic_comparison_table(
     latex_lines.append(r"  \end{tabular}")
 
     if caption is not None:
-        latex_lines = wrap_table(latex_lines, caption, label, "h", arraystretch=1.2)
+        latex_lines = wrap_table(latex_lines, caption, label, "h", arraystretch=1.2, fill_width=True)
 
     TABLES_DIR.mkdir(parents=True, exist_ok=True)
     output_path = TABLES_DIR / output_filename
@@ -693,7 +578,7 @@ def generate_heuristic_comparison_table(
 
 
 def generate_heuristic_parameters_table(
-    blocks, output_filename="heuristic_parameters.tex", caption=None, label=None
+    blocks, output_filename="Table_24_Heuristic_Parameters.tex", caption=None, label=None
 ):
     """
     Generates LaTeX table of the best segment_based_heuristic's parameters, laid out like the
@@ -742,7 +627,7 @@ def generate_heuristic_parameters_table(
                 xi, k = "--", "--"
             latex_lines.append(
                 f"    & {budget_label} & {params.get('inspection_interval', '--')} & "
-                f"{params.get('repair_threshold', '--')} & {xi} & {k} \\\\"
+                f"{paper_repair_threshold(params)} & {xi} & {k} \\\\"
             )
         if b_idx != len(blocks) - 1:
             latex_lines.append(r"    \midrule")
@@ -770,7 +655,7 @@ def format_lr_latex(lr):
 
 def generate_vdn_cbd_configs_table(
     env="CologneBonnDusseldorf-v1-unconstrained",
-    output_filename="vdn_cbd_unconstrained_configs.tex",
+    output_filename="Table_22_VDN_CBD_Unconstrained_Configs.tex",
 ):
     """Hyperparameters of the VDN configurations in the unconstrained CologneBonnDusseldorf
     appendix figure, read from vdn_variants.csv. Only a tabular: the appendix sets it next to
@@ -833,9 +718,6 @@ def write_results_tables():
 
     environments = data["map_name"].unique()
 
-    # Original table
-    generate_latex_table(data, baseline_heuristic_values)
-
     # Main results: constrained and unconstrained per map, algorithms in columns
     generate_latex_table_scenarios(
         data,
@@ -866,7 +748,9 @@ def write_results_tables():
                 ],
             ),
         ],
-        output_filename="best_results_main.tex",
+        output_filename="Table_1_Best_Results.tex",
+        env_header="Map",
+        scenario_header="Environment",
         caption=(
             r"Normalized expected return ($\Delta \bar{R}^\pi_0\%$) with 95\% confidence "
             r"intervals (CI) for each algorithm and environment configuration, reporting the "
@@ -874,7 +758,7 @@ def write_results_tables():
             r"algorithm with the highest expected return in each environment is highlighted in "
             r"bold, while algorithms whose 95\% CI overlaps with that of the highest-performing "
             r"algorithm are underlined. $\text{H}_\text{PS}$ is the reference (0\%); its expected "
-            r"return is given under each scenario. Note that $\text{VDN}_{\text{BA}}$ is a modified VDN "
+            r"return is given under each scenario. $\text{VDN}_{\text{BA}}$$^*$ is a modified VDN "
             r"policy described in Section~\ref{subsec:open_challenge}."
         ),
         label="tab:best_model_returns",
@@ -901,7 +785,7 @@ def write_results_tables():
                 ("Limited (200M)", "Critical (150M)"),
             ),
         ],
-        output_filename="best_model_cologne_budget_scenarios.tex",
+        output_filename="Table_21_Best_Checkpoints_Cologne_Budgets.tex",
         caption=(
             r"Best checkpoint performance per seed according to normalized expected return "
             r"($\Delta \bar{R}^\pi_0$ \%) and IQR, by algorithm, for different \texttt{Cologne} "
@@ -938,7 +822,7 @@ def write_results_tables():
                 constrained_vs_unconstrained,
             ),
         ],
-        output_filename="best_checkpoints_all.tex",
+        output_filename="Table_20_Best_Checkpoints_Envs.tex",
         caption=(
             r"Best checkpoint performance per seed according to normalized expected return "
             r"($\Delta \bar{R}^\pi_0$ \%) and IQR, by environment and algorithm. Constrained "
@@ -978,7 +862,7 @@ def write_results_tables():
     ]
     generate_heuristic_comparison_table(
         blocks=heuristic_blocks,
-        output_filename="heuristic_results_all.tex",
+        output_filename="Table_23_Heuristic_Results.tex",
         caption=(
             r"Expected return ($10^9$) of the expert-based heuristic policies, with standard deviation "
             r"in parentheses. The best heuristic per environment is in bold. Always routine inspections "
@@ -993,7 +877,7 @@ def write_results_tables():
         caption=(
             r"Parameters of the best prioritized segment-based heuristic ($\text{H}_\text{PS}$) per "
             r"environment and budget: inspection interval $T^{\text{insp}}$, repair threshold "
-            r"$i_{\text{thres}}$, prioritization criterion $\xi$ and number of prioritized segments $k$. "
+            r"$i_{\text{thres}}$ (Equation~\ref{eq:insp_based_minrep_insp_dn}), prioritization criterion $\xi$ and number of prioritized segments $k$. "
             r"Without a budget, no prioritization is used (--)."
         ),
         label="tab:heuristic_parameters",
@@ -1035,7 +919,7 @@ CFG_DIR = REPO_ROOT / "experiments" / "config"
 PILOT_DIR = CFG_DIR / "pilot_runs"
 SWEEP_DIR = CFG_DIR / "hyper_parameter_tuning" / "cologne_v1"
 FINAL_DIR = CFG_DIR / "final_runs"
-HYPERPARAMETER_LATEX_PATH = TABLES_DIR / "hyperparameter_tables.tex"
+HYPERPARAMETER_LATEX_PATH = TABLES_DIR / "Table_14_18_Hyperparameters.tex"
 
 
 # ---------------------------------------------------------------------------
@@ -1083,7 +967,7 @@ def label_for(key):
 
 # PQN-VDN goes last, and QMIX/IPPO each close out a page (see write_hyperparameter_latex).
 ALG_ORDER = ["vdn_rnn", "qmix_rnn", "mappo_rnn", "ippo_rnn", "pqn_rnn"]
-CLEARPAGE_AFTER = {"qmix_rnn", "ippo_rnn"}
+CLEARPAGE_AFTER = {"ippo_rnn"}
 DASH = "—"
 
 
@@ -1465,6 +1349,9 @@ def write_hyperparameter_latex(all_rows):
     sections = ["% \\usepackage{booktabs,float}"]
     for a in ALG_ORDER:
         tex_body = to_latex(a, all_rows[a]).rstrip("\n")
+        if a == ALG_ORDER[0]:
+            # The first table may float to the top of the appendix page
+            tex_body = tex_body.replace("\\begin{table}[H]", "\\begin{table}[h]", 1)
         sections.append(f"%% {ALGORITHM_NAMES[a]} %%\n{tex_body}")
         if a in CLEARPAGE_AFTER:
             sections.append("\\clearpage")
@@ -1497,7 +1384,7 @@ def write_hyperparameter_tables(show=True):
 # ===========================================================================
 # Compute usage table (Table 19)
 # ===========================================================================
-COMPUTE_LATEX_PATH = TABLES_DIR / "compute_usage.tex"
+COMPUTE_LATEX_PATH = TABLES_DIR / "Table_19_Compute_Usage.tex"
 
 # ---------------------------------------------------------------------------
 # Table layout -- single label mapping per concept, used by both renderings
@@ -1802,7 +1689,6 @@ def write_compute_latex(table):
     )
 
     lines = [
-        r"% Requires \usepackage{booktabs} and \usepackage{graphicx} (for \resizebox).",
         r"\begin{table}[htbp]",
         r"\centering",
         rf"\caption{{{caption}}}",
@@ -1826,6 +1712,7 @@ def write_compute_latex(table):
     tot_cells = [
         rf"\textbf{{{tex_cell(table['col_tot'][a])}}}" for a in ALG_COL_ORDER
     ] + [rf"\textbf{{{tex_cell(grand_total)}}}"]
+    tot_cells[-1] = r"\textbf{\valuetotalgpunumber{}}"  # defined in paper/definitions.tex
     lines.append(r"\textbf{Total} & " + " & ".join(tot_cells) + r" \\")
     lines += [r"\bottomrule", r"\end{tabular}", r"}", r"\end{table}"]
 
@@ -1848,6 +1735,42 @@ def write_compute_usage_table(csv_path=None):
     table = build_table(work)
     show_compute_console(table)
     write_compute_latex(table)
+
+
+# ---------------------------------------------------------------------------
+# Rollout speedup (Table 12)
+# ---------------------------------------------------------------------------
+SPEEDUP_LATEX_PATH = TABLES_DIR / "Table_12_JAX_Speedup.tex"
+
+
+def write_speedup_table():
+    """Table 12: wall-clock time for 1,000 rollout episodes and speedup over single-core NumPy."""
+    lines = [
+        r"\begin{table}[ht]",
+        r"  \caption{Speedup comparison for 1,000 episodes. Speedup for NumPy multi-processing (MP) "
+        r"and JAX is calculated relative to the respective environment's NumPy timing for 1,000 "
+        r"episodes, e.g., for JAX, Speedup = Time(NumPy) / Time(JAX).}",
+        r"  \label{tab:speedup_comparison_environments}",
+        r"  \centering",
+        r"  \begin{tabular}{@{}l r rr rr@{}}",
+        r"    \toprule",
+        r"    \multirow{2}{*}{Environment} & NumPy & \multicolumn{2}{c}{NumPy (MP)} "
+        r"& \multicolumn{2}{c}{JAX} \\",
+        r"    \cmidrule(lr){2-2} \cmidrule(lr){3-4} \cmidrule(lr){5-6}",
+        r"     & \makecell[c]{Time (s)} & \makecell[c]{Time (s)} & \makecell[c]{Speedup} "
+        r"& \makecell[c]{Time (s)} & \makecell[c]{Speedup} \\",
+        r"    \midrule",
+    ]
+    for env, t in ROLLOUT_TIMES.items():
+        name = env.rsplit("-v", 1)[0]
+        lines.append(
+            rf"    \texttt{{{name}}} & {t['numpy']:.1f} & {t['numpy_mp']:.1f} & "
+            rf"{t['numpy'] / t['numpy_mp']:.1f} & {t['jax']:.1f} & {t['numpy'] / t['jax']:.1f} \\"
+        )
+    lines += [r"    \bottomrule", r"  \end{tabular}", r"\end{table}"]
+    SPEEDUP_LATEX_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SPEEDUP_LATEX_PATH.write_text("\n".join(lines) + "\n")
+    print("Wrote", SPEEDUP_LATEX_PATH)
 
 
 # ===========================================================================
@@ -1874,6 +1797,7 @@ def main():
         write_hyperparameter_tables(show=args.show == "console")
     if args.only in (None, "compute"):
         write_compute_usage_table(args.csv)
+        write_speedup_table()
 
 
 if __name__ == "__main__":
