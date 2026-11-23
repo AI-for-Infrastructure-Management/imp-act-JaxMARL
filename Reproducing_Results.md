@@ -204,6 +204,13 @@ Where
     - `cologne_bonn_dusseldorf_v1` 
 
 
-# Plots
+# Figures and tables
 
-The code to generate Figure 3 based on the results of the training are located in `evaluation/plotting/figure_3.ipynb` with instructions on how to download the data and create the plot.
+The figures, tables and claims of the paper are built by the code in [`results/`](results/README.md) from the released data, which it downloads when missing:
+
+```bash
+python results/create_figures.py
+python results/create_tables.py
+```
+
+See [`results/README.md`](results/README.md) for the script, notebook and data file behind each figure and table.

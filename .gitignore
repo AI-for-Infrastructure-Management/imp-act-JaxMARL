@@ -19,7 +19,8 @@ models/
 *.csv*
 !results.ipynb
 !Figure_8.ipynb
-!results/hyperparameter_tuning_analysis.ipynb
+!results/nb_hyperparameter_tuning.ipynb
+!results/nb_rollout_data.ipynb
 evaluation/data
 
 # Cluster-specific tuning workflow, kept locally

@@ -15,7 +15,7 @@ from pathlib import Path
 import jax
 import numpy as np
 from omegaconf import OmegaConf
-from released_data import best_checkpoint
+from common import best_checkpoint
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evaluation"))  # *_road_env.py modules
 from vdn_rnn_road_env import make_get_rollout_data  # noqa: E402

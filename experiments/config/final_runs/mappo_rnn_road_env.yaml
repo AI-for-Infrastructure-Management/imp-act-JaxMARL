@@ -1,6 +1,6 @@
 # Final-run config for MAPPO on the IMP-act road env.
 # Hyperparameters: best combo C0022 from the 50-combo Cologne-v1 sweep
-# (see evaluation/hyperparameter_tuning_analysis.ipynb).
+# (see results/nb_hyperparameter_tuning.ipynb).
 
 "TOTAL_TIMESTEPS": 50_000_000
 "NUM_ENVS": 64

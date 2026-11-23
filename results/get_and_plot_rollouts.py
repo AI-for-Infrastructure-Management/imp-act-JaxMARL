@@ -1,27 +1,315 @@
-import math
+"""Roll out a released checkpoint or the segment-based heuristic, and plot the episodes.
 
+RolloutDataGenerator rolls out a MARL checkpoint, HeuristicRolloutDataGenerator the
+heuristic; both return the same episode_data dict (see episode_data). RolloutPlotter plots
+one episode of it.
+"""
+
+import copy
+import math
+import os
+import sys
+from pathlib import Path
+
+import jax
+import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+from common import DARK, EDGE, GOLD, ORANGE, PURPLE, TEAL
 from matplotlib import patches
 from matplotlib.colors import PowerNorm, TwoSlopeNorm
 from matplotlib.lines import Line2D
+from omegaconf import OmegaConf
 
-# Style of the paper's Figure 11 (Figure_11.ipynb): viridis tones and orange/purple accents
-PAPER_DARK, PAPER_TEAL, PAPER_PURPLE, PAPER_ORANGE = "#414487", "#22a884", "#7570b3", "#d95f02"
-PAPER_GOLD = "#e6ab02"
-PAPER_EDGE = "#3a3a3a"
-# action id: (label, marker style). Dot / ring: low- / high-fidelity inspection;
+import jaxmarl
+from jaxmarl.wrappers.baselines import CTRolloutManager, LogWrapper
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evaluation"))  # *_road_env.py modules
+
+
+# ---------------------------------------------------------------------------
+# Rollouts
+# ---------------------------------------------------------------------------
+def episode_data(
+    initial_state, states, actions, rewards, infos, agents, max_timesteps,
+    time_first=False, verbose=False,
+):
+    """Collect a batch of rollouts in one dict of arrays, with episodes on the first axis.
+
+    initial_state and states are the IMP-act environment states before the first step and
+    after every step. Per-step arrays (states, actions, rewards, infos) are batch-first
+    (episodes, timesteps, ...), or time-first (timesteps, episodes, ...) with time_first.
+
+    Keys and their shapes, with E episodes, T timesteps, N segments (agents) and S damage
+    states, e.g. for 10 episodes on Cologne:
+
+        action (10, 50, 60)
+        applied_actions (10, 50, 60)
+        budget_constraints_applied (10, 50)
+        budget_remaining (10, 51)
+        edge_beliefs (10, 51, 60, 5)
+        edge_observations (10, 51, 60)
+        edge_states (10, 51, 60)
+        episode_cost (10, 1)
+        forced_repair_flags (10, 50, 60)
+        forced_replace_constraint_applied (10, 50)
+        maintenance_reward (10, 50)
+        reward (10, 50)
+        terminal_reward (10, 50)
+        timesteps (10, 51)
+        total_travel_time (10, 50)
+        traffic_volumes (10, 50, 60)
+        travel_time_reward (10, 50)
+        travel_times (10, 50, 60)
+    """
+
+    def batch_first(x):
+        return jnp.swapaxes(x, 0, 1) if time_first else x
+
+    def with_initial(field):
+        """The state field before the first step and after every step: (E, T+1, ...)."""
+        return jnp.concatenate(
+            [getattr(initial_state, field)[:, None], batch_first(getattr(states, field))], axis=1
+        )
+
+    returns = batch_first(infos["returned_episode_returns"] * infos["returned_episode"])
+    data = {
+        # observations
+        "timesteps": with_initial("timestep"),
+        "edge_states": with_initial("damage_state"),
+        "edge_observations": with_initial("observation"),
+        "edge_beliefs": with_initial("belief"),
+        # actions
+        "action": batch_first(jnp.stack([actions[a] for a in agents], axis=-1)),
+        "applied_actions": batch_first(infos["applied_actions"]),
+        "forced_replace_constraint_applied": batch_first(infos["forced_replace_constraint_applied"]),
+        # traffic
+        "travel_times": batch_first(infos["travel_times"]),
+        "traffic_volumes": batch_first(infos["traffic_volumes"]),
+        "total_travel_time": batch_first(infos["total_travel_time"]),
+        # budget
+        "budget_remaining": with_initial("budget_remaining"),
+        "budget_constraints_applied": batch_first(infos["budget_constraints_applied"]),
+        "forced_repair_flags": batch_first(infos["forced_repair_flags"]),
+        # rewards
+        "reward": batch_first(rewards["__all__"]),
+        "episode_cost": returns.mean(axis=-1).sum(axis=-1, keepdims=True),
+        "travel_time_reward": batch_first(infos["reward_elements"]["travel_time_reward"]),
+        "maintenance_reward": batch_first(infos["reward_elements"]["maintenance_reward"]),
+        "terminal_reward": batch_first(infos["reward_elements"]["terminal_reward"]),
+    }
+
+    # The rollout must cover the whole episode
+    assert (
+        data["timesteps"][0, -1] == max_timesteps
+    ), f"Last timestep is not the same as the env.max_timesteps: {data['timesteps'][0, -1]} != {max_timesteps}. Make sure to disable the automatic reset of the environment in the last step of the rollout."
+
+    if verbose:
+        for key in sorted(data):
+            print(f"{key:<35}", data[key].shape)
+
+    return data
+
+
+def get_single_episode_data(episode_data, episode_idx=0):
+    """One episode of the rollout data."""
+    return jax.tree.map(lambda x: x[episode_idx], episode_data)
+
+
+class RolloutDataGenerator:
+
+    def __init__(self, env_name, alg, checkpoint_path, checkpoint_id, test_num_envs=10):
+        """Roll out the checkpoint `checkpoint_id` of the run directory `checkpoint_path`.
+
+        The run directory holds config.yaml and
+        checkpoints/<vmapped_seed_key>/checkpoint_<id>.safetensors (the layout of the
+        released checkpoints).
+        """
+        self.env_name = env_name
+        self.alg = alg
+        self.checkpoint_id = checkpoint_id
+        vmapped_seed = 0
+
+        # train config
+        train_config = OmegaConf.to_container(
+            OmegaConf.load(os.path.join(checkpoint_path, "config.yaml"))
+        )
+        # Saved configs omit NUM_UPDATES, which sets the zero-padding of checkpoint names
+        train_config.setdefault(
+            "NUM_UPDATES",
+            train_config["TOTAL_TIMESTEPS"]
+            // train_config["NUM_STEPS"]
+            // train_config["NUM_ENVS"],
+        )
+
+        if self.alg in ["mappo_rnn", "mappo"]:
+
+            from mappo_rnn_road_env import load_checkpoint_agent, make_get_rollout_data
+
+            # Initialise environment
+            env = jaxmarl.make(train_config["ENV_NAME"], **train_config["ENV_KWARGS"])
+            _, _, loaded_params, _ = load_checkpoint_agent(
+                checkpoint_path, self.checkpoint_id, vmapped_seed, train_config
+            )
+
+        elif self.alg in ["ippo_rnn", "ippo"]:
+            from ippo_rnn_road_env import load_checkpoint_agent, make_get_rollout_data
+
+            # Initialise environment
+            env = jaxmarl.make(train_config["ENV_NAME"], **train_config["ENV_KWARGS"])
+
+            _, loaded_params, _ = load_checkpoint_agent(
+                checkpoint_path, self.checkpoint_id, vmapped_seed, train_config
+            )
+
+        elif self.alg in ["vdn_rnn", "vdn"]:
+
+            from vdn_rnn_road_env import (
+                load_checkpoint_agent,
+                make_get_rollout_data,
+                env_from_config,
+            )
+
+            # Initialise environment
+            env, _ = env_from_config(copy.deepcopy(train_config))
+            env = CTRolloutManager(env, batch_size=1, preprocess_obs=False)
+
+            train_config["MAX_ACTION_SPACE"] = env.max_action_space
+            loaded_params, _, _ = load_checkpoint_agent(
+                checkpoint_path, self.checkpoint_id, vmapped_seed, train_config
+            )
+
+        elif self.alg in ["qmix_rnn", "qmix"]:
+            from qmix_rnn_road_env import (
+                load_checkpoint_agent,
+                make_get_rollout_data,
+                env_from_config,
+            )
+
+            # Initialise environment
+            env, _ = env_from_config(copy.deepcopy(train_config))
+            env = CTRolloutManager(env, batch_size=1, preprocess_obs=False)
+
+            train_config["MAX_ACTION_SPACE"] = env.max_action_space
+            loaded_params, _, _, _ = load_checkpoint_agent(
+                checkpoint_path, self.checkpoint_id, vmapped_seed, train_config
+            )
+
+        elif self.alg in ["pqn_rnn", "pqn"]:
+            from pqn_rnn_road_env import (
+                load_checkpoint_agent,
+                make_get_rollout_data,
+                env_from_config,
+            )
+
+            # Initialise environment
+            env, _ = env_from_config(copy.deepcopy(train_config))
+            env = CTRolloutManager(env, batch_size=1, preprocess_obs=False)
+
+            train_config["MAX_ACTION_SPACE"] = env.max_action_space
+            loaded_params, _ = load_checkpoint_agent(
+                checkpoint_path, self.checkpoint_id, vmapped_seed, train_config
+            )
+
+        else:
+            raise NotImplementedError(f"Algorithm {self.alg} not supported.")
+
+        self.jit_get_rollout_data = jax.jit(
+            make_get_rollout_data(train_config, test_num_envs)
+        )
+        self.loaded_params = loaded_params
+        self.env = env
+        self.road_env = env.env
+
+    def generate_rollout_data(self, key, verbose=False):
+        """Roll out test_num_envs episodes; see episode_data for the keys and shapes."""
+        initial_env_state, env_state, env_act, rewards, infos = self.jit_get_rollout_data(
+            key, self.loaded_params
+        )
+        return episode_data(
+            initial_env_state.env_state, env_state.env_state, env_act, rewards, infos,
+            self.env.agents, self.road_env.max_timesteps, time_first=True, verbose=verbose,
+        )
+
+    get_single_episode_data = staticmethod(get_single_episode_data)
+
+
+class HeuristicRolloutDataGenerator:
+
+    def __init__(self, config):
+        """Roll out the segment-based heuristic with the parameters in `config`."""
+        from heuristic_evaluation_road_env import make_get_rollout_data
+
+        # Environment
+        env = jaxmarl.make("road_env", map_name=config["map"], record_rollout=True)
+        env = LogWrapper(env)
+        self.env = env
+        self.road_env = env.env
+
+        # Rollout data generator
+        self.get_rollout_data = make_get_rollout_data(config)
+
+    def generate_rollout_data(self, key, num_rollouts, verbose=False):
+        """Roll out num_rollouts episodes; see episode_data for the keys and shapes."""
+        rollout_keys = jax.random.split(key, num_rollouts)
+        initial_env_state, env_state, actions, rewards, infos = self.get_rollout_data(
+            rollout_keys
+        )
+        return episode_data(
+            initial_env_state.env_state, env_state.env_state, actions, rewards, infos,
+            self.env.agents, self.road_env.max_timesteps, verbose=verbose,
+        )
+
+    get_single_episode_data = staticmethod(get_single_episode_data)
+
+
+# ---------------------------------------------------------------------------
+# Plots
+# ---------------------------------------------------------------------------
+# action id: (label, marker style). Dot / ring: low- / high-fidelity inspection (a lens);
 # hollow / filled plus: minor / major repair; star: replaced, as new.
-PAPER_ACTIONS = {
+ACTIONS = {
     0: ("Low-fidelity inspection", {"marker": ".", "color": "0.5", "markersize": 4}),
-    1: ("High-fidelity inspection", {"marker": "o", "markerfacecolor": "white",
-         "markeredgecolor": PAPER_EDGE, "markeredgewidth": 0.6, "markersize": 4}),
-    2: ("Minor repair", {"marker": "P", "fillstyle": "none", "markeredgecolor": PAPER_PURPLE,
-         "markeredgewidth": 0.8, "markersize": 5.5}),
-    3: ("Major repair", {"marker": "P", "markerfacecolor": PAPER_DARK,
-         "markeredgecolor": PAPER_EDGE, "markeredgewidth": 0.4, "markersize": 5.5}),
-    4: ("Replace", {"marker": "*", "markerfacecolor": PAPER_ORANGE,
-         "markeredgecolor": PAPER_EDGE, "markeredgewidth": 0.4, "markersize": 7}),
+    1: (
+        "High-fidelity inspection",
+        {
+            "marker": "o",
+            "markerfacecolor": "white",
+            "markeredgecolor": EDGE,
+            "markeredgewidth": 0.6,
+            "markersize": 4,
+        },
+    ),
+    2: (
+        "Minor repair",
+        {
+            "marker": "P",
+            "fillstyle": "none",
+            "markeredgecolor": PURPLE,
+            "markeredgewidth": 0.8,
+            "markersize": 5.5,
+        },
+    ),
+    3: (
+        "Major repair",
+        {
+            "marker": "P",
+            "markerfacecolor": DARK,
+            "markeredgecolor": EDGE,
+            "markeredgewidth": 0.4,
+            "markersize": 5.5,
+        },
+    ),
+    4: (
+        "Replace",
+        {
+            "marker": "*",
+            "markerfacecolor": ORANGE,
+            "markeredgecolor": EDGE,
+            "markeredgewidth": 0.4,
+            "markersize": 7,
+        },
+    ),
 }
 
 
@@ -107,7 +395,7 @@ class RolloutPlotter:
                 ax.axvline(t, color="gray", linestyle="--", linewidth=0.8, alpha=0.6, zorder=0)
 
         def mark_actions(ax, actions, y, **kwargs):
-            for a, (_, style) in PAPER_ACTIONS.items():
+            for a, (_, style) in ACTIONS.items():
                 t = np.where(actions == a)[0]
                 ax.plot(t, np.full(len(t), y), linestyle="", **style, **kwargs)
 
@@ -132,7 +420,7 @@ class RolloutPlotter:
             states = np.asarray(plot_data["edge_states"])[:, seg]
             ax_det.plot(t_state, states, color="black", linewidth=1.4)
             ax_det.plot(t_state, np.asarray(plot_data["edge_observations"])[:, seg], "-o",
-                        color=PAPER_GOLD, markersize=2, linewidth=0.7)
+                        color=GOLD, markersize=2, linewidth=0.7)
             for t in np.where(states == S - 1)[0]:
                 ax_det.axvline(t, color="red", linestyle="--", linewidth=1.0)
             ax_det.axvspan(T - 0.5, T + 0.5, facecolor="none", edgecolor="0.7", hatch="////",
@@ -161,7 +449,7 @@ class RolloutPlotter:
         fig.legend(
             handles=[
                 Line2D([], [], color="black", linewidth=1.4, label="True damage state"),
-                Line2D([], [], color=PAPER_GOLD, marker="o", markersize=2, linewidth=0.7,
+                Line2D([], [], color=GOLD, marker="o", markersize=2, linewidth=0.7,
                        label="Observation"),
                 patches.Patch(facecolor="0.6", alpha=0.35, label="Belief"),
                 Line2D([], [], color="red", linestyle="--", label="Unsafe state"),
@@ -170,7 +458,7 @@ class RolloutPlotter:
                               label="Terminal state"),
                 Line2D([], [], color="gray", linestyle="--", linewidth=0.8, label="Budget renewal"),
                 *[Line2D([], [], linestyle="", label=label, **style)
-                  for label, style in PAPER_ACTIONS.values()],
+                  for label, style in ACTIONS.values()],
             ],
             loc="lower center", bbox_to_anchor=(0.5, 0), ncol=6, frameon=False,
             columnspacing=0.8, handlelength=1.4, handletextpad=0.4,
@@ -196,7 +484,7 @@ class RolloutPlotter:
 
         fig, ax = plt.subplots(figsize=(fig_width, fig_height), layout="constrained")
         used = 100 * (1 - np.asarray(plot_data["budget_remaining"]) / float(self.env.budget_amount))
-        ax.plot(t_state, used, "-o", color=PAPER_DARK, linewidth=1.2, markersize=2.5,
+        ax.plot(t_state, used, "-o", color=DARK, linewidth=1.2, markersize=2.5,
                 markerfacecolor="white", markeredgewidth=0.8)
         for t, count in enumerate(np.asarray(plot_data["forced_replace_constraint_applied"])):
             if count:
@@ -225,7 +513,7 @@ class RolloutPlotter:
         ax.patch.set_visible(False)
 
         handles = [
-            Line2D([], [], color=PAPER_DARK, marker="o", markersize=2.5, markerfacecolor="white",
+            Line2D([], [], color=DARK, marker="o", markersize=2.5, markerfacecolor="white",
                    label="Budget used"),
             Line2D([], [], color="gray", linestyle="--", linewidth=0.8, label="Budget renewal"),
             Line2D([], [], color="red", marker="*", linestyle="", markersize=6,
@@ -285,7 +573,7 @@ class RolloutPlotter:
         def mark_maintenance(ax):
             for a in (2, 3, 4):  # repairs and replacements
                 t, seg = np.where(applied == a)
-                style = {**PAPER_ACTIONS[a][1]}
+                style = {**ACTIONS[a][1]}
                 style["markersize"] = style["markersize"] * 0.5
                 ax.plot(t + 0.5, seg + 0.5, linestyle="", **style)
 
@@ -294,7 +582,7 @@ class RolloutPlotter:
                 ax.axvline(t, color="gray", linestyle="--", linewidth=0.6, alpha=0.6)
 
         # Rerouting strip
-        ax_shift.bar(np.arange(T) + 0.5, rerouted, width=0.8, color=PAPER_DARK)
+        ax_shift.bar(np.arange(T) + 0.5, rerouted, width=0.8, color=DARK)
         ax_shift.set_ylabel("Rerouted\n(% of traffic)")
         ax_shift.set_title("(a) Traffic volume and rerouting", loc="left")
         ax_shift.grid(True, axis="y", alpha=0.3)
@@ -333,7 +621,7 @@ class RolloutPlotter:
         ax_tt.set_xlabel("Timestep")
         ax_shift.legend(
             handles=[
-                *[Line2D([], [], linestyle="", label=PAPER_ACTIONS[a][0], **PAPER_ACTIONS[a][1])
+                *[Line2D([], [], linestyle="", label=ACTIONS[a][0], **ACTIONS[a][1])
                   for a in (2, 3, 4)],
                 Line2D([], [], color="gray", linestyle="--", linewidth=0.6, label="Budget renewal"),
             ],
@@ -354,9 +642,9 @@ class RolloutPlotter:
         T = self.max_timesteps
         t_act = np.arange(T)
         components = [
-            ("Travel time", -np.asarray(plot_data["travel_time_reward"]), PAPER_DARK),
-            ("Maintenance", -np.asarray(plot_data["maintenance_reward"]), PAPER_TEAL),
-            ("Terminal", -np.asarray(plot_data["terminal_reward"]), PAPER_ORANGE),
+            ("Travel time", -np.asarray(plot_data["travel_time_reward"]), DARK),
+            ("Maintenance", -np.asarray(plot_data["maintenance_reward"]), TEAL),
+            ("Terminal", -np.asarray(plot_data["terminal_reward"]), ORANGE),
         ]
 
         fig, (ax_tt, ax_cost, ax_share) = plt.subplots(
@@ -376,7 +664,7 @@ class RolloutPlotter:
         # (a) Travel time
         travel_time = 100 * np.asarray(plot_data["total_travel_time"]) / float(self.base_total_travel_time)
         ax_tt.axhline(100, color="black", linestyle=":", linewidth=0.8)
-        ax_tt.plot(t_act, travel_time, "-o", color=PAPER_DARK, linewidth=1.2, markersize=2.5,
+        ax_tt.plot(t_act, travel_time, "-o", color=DARK, linewidth=1.2, markersize=2.5,
                    markerfacecolor="white", markeredgewidth=0.8)
         ax_tt.set_ylabel("Travel Time (% of base)")
         ax_tt.set_title("(a) Network travel time")

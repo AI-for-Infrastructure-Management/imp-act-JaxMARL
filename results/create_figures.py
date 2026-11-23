@@ -1,6 +1,14 @@
-import os
-import urllib.request
-from pathlib import Path
+"""Build the figures of the paper (Figs. 3-11 and the extra figures), written to figures/.
+
+Figure 11 rolls out the best VDN checkpoint, so it needs JAX and the released checkpoint
+(downloaded from Zenodo if missing); --skip-figure-11 builds only the other figures.
+
+Usage:
+    python results/create_figures.py
+    python results/create_figures.py --skip-figure-11
+"""
+
+import argparse
 
 import matplotlib.colors as mcolors
 import matplotlib.lines as mlines
@@ -10,63 +18,28 @@ import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from common import (
+    ABSOLUTE_RETURN_LABEL,
+    ALGORITHM_NAMES,
+    ALGORITHMS,
+    DARK,
+    EDGE,
+    ENV_BUDGETS,
+    FIGURES_DIR,
+    GOLD,
+    PLOT_PARAMS,
+    RELATIVE_PERFORMANCE_LABEL,
+    TEAL,
+    baseline_values,
+    best_checkpoint,
+    best_per_run,
+    data_file,
+    denormalize,
+    load_results,
+    normalize,
+    tt,
+)
 from scipy.stats import trim_mean
-
-# Configuration. Paths are relative to this folder, so the script runs (and imports) from
-# anywhere, and are shown relative to the working directory.
-PLOTTING_DIR = Path(os.path.relpath(Path(__file__).resolve().parent))
-DATA_DIR = PLOTTING_DIR / "data"
-FIGURES_DIR = PLOTTING_DIR / "figures"
-HEURISTIC_RESULTS_FILE = DATA_DIR / "heuristics.csv"
-EVALUATION_RESULTS_FILE = DATA_DIR / "results.csv"
-# The input files are released on Zenodo; missing ones are downloaded from there
-ZENODO_FILES_URL = "https://zenodo.org/records/24175731/files"
-INPUT_FILES = ["results.csv", "heuristics.csv", "tuning_results.parquet", "vdn_variants.csv"]
-
-
-def download_missing_inputs():
-    """Download the input files that are not in DATA_DIR yet from the Zenodo record."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    for name in INPUT_FILES:
-        path = DATA_DIR / name
-        if path.exists():
-            continue
-        print(f"Downloading {name} from {ZENODO_FILES_URL}")
-        partial = path.with_name(f"{name}.part")  # renamed once complete
-        urllib.request.urlretrieve(f"{ZENODO_FILES_URL}/{name}?download=1", partial)
-        partial.rename(path)
-
-
-download_missing_inputs()
-
-# Heuristic results, one row per (map_name, heuristic)
-HEURISTICS = pd.read_csv(HEURISTIC_RESULTS_FILE).set_index(["map_name", "heuristic"])
-# H_PS: the segment-based heuristic that the algorithms are compared with
-BASELINE_HEURISTIC_VALUES = HEURISTICS.xs("segment_based_heuristic", level="heuristic")[
-    "mean_reward"
-].to_dict()
-
-
-ALGORITHM_NAMES = {
-    "vdn_rnn": "VDN",
-    "qmix_rnn": "QMIX",
-    "pqn_rnn": "PQN-VDN",
-    "ippo_rnn": "IPPO",
-    "mappo_rnn": "MAPPO",
-    "vdn_ba_rnn": "VDN-BA",
-}
-
-def tt(map_name):
-    """Map name in typewriter font, as \\texttt in the paper."""
-    return rf"$\mathtt{{{map_name}}}$"
-
-
-# Budgets of the constrained scenarios from the imp-act presets (budget_amount)
-ENV_BUDGETS = {
-    "ToyExample-v2": "6.5M",
-    "Cologne-v1": "200M",
-    "CologneBonnDusseldorf-v1": "800M",
-}
 
 ENV_PLOT_TITLES = {
     "ToyExample-v2": f"{tt('ToyExample')}\n(12 agents)",
@@ -79,58 +52,13 @@ ENV_PLOT_TITLES = {
     "Cologne-v1-moderate-budget": f"{tt('Cologne')} Moderate\n(60 agents, 300M budget)",
 }
 
-PLOT_PARAMS = {
-    "font.size": 8,
-    "font.family": "serif",
-    "font.serif": ["Times New Roman"],
-    "axes.titlesize": 8,
-    "axes.labelsize": 8,
-    "xtick.labelsize": 7,
-    "ytick.labelsize": 7,
-    "legend.fontsize": 7,
-    "text.usetex": False,
-    # Math in Times, and \mathtt in LaTeX's typewriter font (the default DejaVu Sans Mono is
-    # wider and heavier than the surrounding Times text)
-    "mathtext.fontset": "custom",
-    "mathtext.rm": "Times New Roman",
-    "mathtext.it": "Times New Roman:italic",
-    "mathtext.bf": "Times New Roman:bold",
-    "mathtext.tt": "CMU Typewriter Text",
-}
 
-# Y-axis label of the relative performance plots
-RELATIVE_PERFORMANCE_LABEL = r"Normalized Expected Return ($\Delta \bar{R}^{\pi}_0$ %)"
-ABSOLUTE_RETURN_LABEL = r"Expected Return ($\mathbb{E}\left[R_0^\pi\right]$)"
-
-
-def load_data():
-    """Loads evaluation data and the H_PS value per map."""
-    data = pd.read_csv(EVALUATION_RESULTS_FILE)
-    return data, BASELINE_HEURISTIC_VALUES
-
-
-def get_best_checkpoints(data, env_name, baseline_heuristic_values):
-    """
-    Extracts best checkpoints for each algorithm and normalizes rewards.
-    """
-    algorithms = data["algorithm"].unique()
-    heuristic_score = baseline_heuristic_values[env_name]
-
-    best_checkpoint_per_algorithm_norm = {}
-
-    for alg in algorithms:
-        alg_data = data[data["algorithm"] == alg]
-        runs = alg_data["run"].unique()
-
-        best_runs = {}
-        for run in runs:
-            run_max = alg_data[alg_data["run"] == run]["mean"].max()
-            # Normalize
-            best_runs[run] = (run_max - heuristic_score) / abs(heuristic_score)
-
-        best_checkpoint_per_algorithm_norm[alg] = best_runs
-
-    return best_checkpoint_per_algorithm_norm
+def get_best_checkpoints(data, env_name):
+    """Best checkpoint return of every run per algorithm, as % over H_PS: {alg: {run: %}}."""
+    return {
+        alg: dict(zip(runs["run"], runs["mean_pct"]))
+        for alg, runs in best_per_run(data, env_name).groupby("algorithm", sort=False)
+    }
 
 
 def prepare_plot_data(best_checkpoints, algorithms_to_plot):
@@ -142,7 +70,7 @@ def prepare_plot_data(best_checkpoints, algorithms_to_plot):
         for value in runs.values():
             if pd.notna(value) and np.isfinite(value):
                 plot_data_norm.append(
-                    {"Algorithm": alg, "Performance Improvement (%)": value * 100}
+                    {"Algorithm": alg, "Performance Improvement (%)": value}
                 )
     df = pd.DataFrame(plot_data_norm)
     if df.empty and "Algorithm" not in df.columns:
@@ -354,7 +282,7 @@ def create_plots(
     np.random.seed(random_seed)
 
     num_envs = len(envs_to_plot)
-    fig, axes = plt.subplots(1, num_envs, figsize=figsize, sharey=True)
+    _, axes = plt.subplots(1, num_envs, figsize=figsize, sharey=True)
 
     if num_envs == 1:
         axes = [axes]
@@ -568,7 +496,7 @@ def create_plots_combined(
 
         # Y-axis formatting
         ax.set_ylim(y_lims)
-        y_min, y_max = ax.get_ylim()
+        y_min, _ = ax.get_ylim()
         ax.yaxis.set_major_formatter(
             mticker.FuncFormatter(
                 lambda y, pos, y_min=y_min: custom_y_labels(y, pos, y_min)
@@ -761,10 +689,10 @@ def create_training_curves(
             heuristic_score = baseline_heuristic_values[env_name]
 
             def to_pct(r, h=heuristic_score):
-                return (r - h) / abs(h) * 100
+                return normalize(r, h)
 
             def to_return(p, h=heuristic_score):
-                return h + p / 100 * abs(h)
+                return denormalize(p, h)
 
             env_data = data[data["map_name"] == env_name]
             for alg in algorithms_to_plot:
@@ -820,9 +748,7 @@ def create_training_curves(
             abs_ax.tick_params(axis="y", colors="0.5", labelsize=6)
             abs_ax.spines["right"].set_color("0.5")
 
-            ax.set_title(
-                title_dict.get(env_name, env_name), fontsize=8
-            )
+            ax.set_title(title_dict.get(env_name, env_name), fontsize=8)
             ax.set_xlim(0, TOTAL_TIMESTEPS)
             ax.xaxis.set_major_formatter(
                 mticker.FuncFormatter(lambda x, pos: f"{x/1e6:.0f}M")
@@ -887,16 +813,14 @@ ROLLOUT_TIMES = {
 VDN_TRAINING_TIMES = {"numpy_epymarl": 1_987_397, "jax_jaxmarl": 21_952}
 
 
-# VDN hyperparameter sensitivity (appendix): one row per VDN run, with its configuration
-# label (Rank 1, Rank 2-5, LR only, Hidden only, 100M steps) and best test return
-VDN_VARIANTS_FILE = DATA_DIR / "vdn_variants.csv"
-# Every run of the hyperparameter tuning sweep on Cologne, one row per logged update
-TUNING_RESULTS_FILE = DATA_DIR / "tuning_results.parquet"
-
-
 def load_vdn_runs(env_name):
-    """The VDN runs on `env_name` that reached at least 95% of TOTAL_TIMESTEPS."""
-    runs = pd.read_csv(VDN_VARIANTS_FILE)
+    """The VDN runs on `env_name` that reached at least 95% of TOTAL_TIMESTEPS.
+
+    vdn_variants.csv (VDN hyperparameter sensitivity, appendix) has one row per VDN run, with
+    its configuration label (Rank 1, Rank 2-5, LR only, Hidden only, 100M steps) and best test
+    return.
+    """
+    runs = pd.read_csv(data_file("vdn_variants.csv"))
     runs = runs[runs["map_name"] == env_name]
     return runs[runs["last_env_step"] >= 0.95 * runs["TOTAL_TIMESTEPS"]]
 
@@ -904,13 +828,25 @@ def load_vdn_runs(env_name):
 def load_vdn_variants(env_name, heuristic_value):
     """Best test return per seed (% over H_PS) for every VDN configuration run on `env_name`."""
     runs = load_vdn_runs(env_name)
-    pct = (runs["best_test_return"] - heuristic_value) / abs(heuristic_value) * 100
-    return {label: list(values) for label, values in pct.groupby(runs["configuration"], sort=False)}
+    pct = normalize(runs["best_test_return"], heuristic_value)
+    return {
+        label: list(values)
+        for label, values in pct.groupby(runs["configuration"], sort=False)
+    }
 
 
 # Order of the configurations in the CologneBonnDusseldorf-unconstrained figure and table:
 # next-best ranks first, then single changes and longer training
-VDN_CBD_ORDER = ["Rank 1", "Rank 2", "Rank 3", "Rank 4", "Rank 5", "LR only", "Hidden only", "100M steps"]
+VDN_CBD_ORDER = [
+    "Rank 1",
+    "Rank 2",
+    "Rank 3",
+    "Rank 4",
+    "Rank 5",
+    "LR only",
+    "Hidden only",
+    "100M steps",
+]
 
 
 # Colors of the VDN appendix figures: stops of the viridis palette used in the other figures
@@ -926,7 +862,7 @@ VDN_COLORS = {
 def median_color(face_color):
     """Median line color that stays visible on the box fill (white on dark fills)."""
     r, g, b = mcolors.to_rgb(face_color)
-    return "white" if 0.299 * r + 0.587 * g + 0.114 * b < 0.45 else "#3a3a3a"
+    return "white" if 0.299 * r + 0.587 * g + 0.114 * b < 0.45 else EDGE
 
 
 def load_vdn_tuning_ranking(heuristic_value, n_bins=100):
@@ -935,18 +871,32 @@ def load_vdn_tuning_ranking(heuristic_value, n_bins=100):
     Per combination: best test return of each seed and the learning curve of each seed
     (last test return in each of `n_bins` equal env-step bins), both as % over H_PS.
     """
-    columns = ["algorithm", "COMBO_ID", "SEED", "TOTAL_TIMESTEPS", "env_step", "test_returned_episode_returns"]
-    tuning = pd.read_parquet(TUNING_RESULTS_FILE, columns=columns)
-    tuning = tuning[tuning["algorithm"] == "vdn_rnn"].dropna(subset=["test_returned_episode_returns"])
+    columns = [
+        "algorithm",
+        "COMBO_ID",
+        "SEED",
+        "TOTAL_TIMESTEPS",
+        "env_step",
+        "test_returned_episode_returns",
+    ]
+    # Every run of the hyperparameter tuning sweep on Cologne, one row per logged update
+    tuning = pd.read_parquet(data_file("tuning_results.parquet"), columns=columns)
+    tuning = tuning[tuning["algorithm"] == "vdn_rnn"].dropna(
+        subset=["test_returned_episode_returns"]
+    )
     seeds, curves = {}, {}
     for (combo, _), run in tuning.groupby(["COMBO_ID", "SEED"], sort=False):
         total_steps = run["TOTAL_TIMESTEPS"].iloc[0]
-        pct = (run["test_returned_episode_returns"] - heuristic_value) / abs(heuristic_value) * 100
-        bins = np.minimum((run["env_step"] / total_steps * n_bins).astype(int), n_bins - 1)
+        pct = normalize(run["test_returned_episode_returns"], heuristic_value)
+        bins = np.minimum(
+            (run["env_step"] / total_steps * n_bins).astype(int), n_bins - 1
+        )
         seeds.setdefault(combo, []).append(pct.max())
         curve = pct.groupby(bins).last().reindex(range(n_bins))
         # Light smoothing over neighbouring bins, as test returns are noisy
-        curves.setdefault(combo, []).append(curve.rolling(5, min_periods=1).mean().values)
+        curves.setdefault(combo, []).append(
+            curve.rolling(5, min_periods=1).mean().values
+        )
     steps = (np.arange(n_bins) + 1) / n_bins * total_steps
     ranked = sorted(seeds, key=lambda c: np.mean(seeds[c]), reverse=True)
     return steps, [(combo, seeds[combo], np.array(curves[combo])) for combo in ranked]
@@ -963,12 +913,11 @@ def draw_min_max_boxes(ax, groups, positions, colors, y_floor, width=0.6):
             whis=(0, 100),
             patch_artist=True,
             showfliers=False,
-            boxprops={"facecolor": color, "edgecolor": "#3a3a3a", "linewidth": 0.8},
+            boxprops={"facecolor": color, "edgecolor": EDGE, "linewidth": 0.8},
             medianprops={"color": median_color(color), "linewidth": 1.0},
-            whiskerprops={"color": "#3a3a3a", "linewidth": 0.8},
-            capprops={"color": "#3a3a3a", "linewidth": 0.8},
+            whiskerprops={"color": EDGE, "linewidth": 0.8},
+            capprops={"color": EDGE, "linewidth": 0.8},
         )
-
 
 
 def style_vdn_axis(ax, y_floor, y_top, y_ticks):
@@ -1016,7 +965,10 @@ def save_vdn_figure(fig, filename):
 
 
 def create_vdn_tuning_figure(
-    baseline_heuristic_values, filename="Figure_8_VDN_Tuning_Cologne", top_n=10, figsize=(7.0, 2.8)
+    baseline_heuristic_values,
+    filename="Figure_8_VDN_Tuning_Cologne",
+    top_n=10,
+    figsize=(7.0, 2.8),
 ):
     """Top `top_n` configurations of the VDN tuning sweep on budget-constrained Cologne:
     (a) mean learning curve over the sweep seeds, styled as the training curves;
@@ -1029,9 +981,9 @@ def create_vdn_tuning_figure(
 
     def rank_color(rank):
         return (
-            VDN_COLORS["Rank 1"] if rank == 1
-            else VDN_COLORS["alternative"] if rank <= 5
-            else VDN_COLORS["lower rank"]
+            VDN_COLORS["Rank 1"]
+            if rank == 1
+            else VDN_COLORS["alternative"] if rank <= 5 else VDN_COLORS["lower rank"]
         )
 
     # (a) Learning curves as in the training-curve figures: dashed H_PS line, its value in the
@@ -1039,18 +991,32 @@ def create_vdn_tuning_figure(
     # Drawn worst-first so rank 1 ends up on top.
     for rank, (_, _, curves) in reversed(list(enumerate(ranking, start=1))):
         ax_curves.plot(
-            steps, np.nanmean(curves, axis=0), color=rank_color(rank),
-            linewidth=1.5 if rank == 1 else 1.0, zorder=3 if rank == 1 else 2,
+            steps,
+            np.nanmean(curves, axis=0),
+            color=rank_color(rank),
+            linewidth=1.5 if rank == 1 else 1.0,
+            zorder=3 if rank == 1 else 2,
         )
         if rank == 1:
             ax_curves.fill_between(
-                steps, np.nanmin(curves, axis=0), np.nanmax(curves, axis=0),
-                color=rank_color(rank), alpha=0.2, linewidth=0, zorder=1,
+                steps,
+                np.nanmin(curves, axis=0),
+                np.nanmax(curves, axis=0),
+                color=rank_color(rank),
+                alpha=0.2,
+                linewidth=0,
+                zorder=1,
             )
     ax_curves.axhline(y=0, color="red", linestyle="--", linewidth=1)
     ax_curves.text(
-        0.02, 0.97, f"$\\text{{H}}_\\text{{PS}}$ = {format_return(heuristic_score)}",
-        transform=ax_curves.transAxes, ha="left", va="top", color="red", fontsize=7,
+        0.02,
+        0.97,
+        f"$\\text{{H}}_\\text{{PS}}$ = {format_return(heuristic_score)}",
+        transform=ax_curves.transAxes,
+        ha="left",
+        va="top",
+        color="red",
+        fontsize=7,
         fontweight="bold",
     )
     y_lims = (-40, 30)
@@ -1061,8 +1027,8 @@ def create_vdn_tuning_figure(
     abs_ax = ax_curves.secondary_yaxis(
         "right",
         functions=(
-            lambda p: heuristic_score + p / 100 * abs(heuristic_score),
-            lambda r: (r - heuristic_score) / abs(heuristic_score) * 100,
+            lambda p: denormalize(p, heuristic_score),
+            lambda r: normalize(r, heuristic_score),
         ),
     )
     abs_ax.yaxis.set_major_formatter(mticker.FuncFormatter(format_return))
@@ -1071,7 +1037,9 @@ def create_vdn_tuning_figure(
     abs_ax.set_ylabel(ABSOLUTE_RETURN_LABEL, color="0.5")
     ax_curves.set_xlim(0, steps[-1])
     ax_curves.xaxis.set_major_locator(mticker.MultipleLocator(5e6))
-    ax_curves.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, pos: f"{x/1e6:.0f}M"))
+    ax_curves.xaxis.set_major_formatter(
+        mticker.FuncFormatter(lambda x, pos: f"{x/1e6:.0f}M")
+    )
     ax_curves.set_xlabel("Environment Steps")
     ax_curves.set_ylabel(RELATIVE_PERFORMANCE_LABEL)
     ax_curves.set_title("(a) Learning curves (mean over seeds)", fontsize=8)
@@ -1107,13 +1075,24 @@ def create_vdn_tuning_figure(
     rng = np.random.default_rng(0)
     for x, (_, values, _) in enumerate(ranking):
         ax_box.scatter(
-            x + rng.uniform(-0.12, 0.12, len(values)), values,
-            s=8, color="#3a3a3a", edgecolor="white", linewidth=0.4, zorder=4,
+            x + rng.uniform(-0.12, 0.12, len(values)),
+            values,
+            s=8,
+            color=EDGE,
+            edgecolor="white",
+            linewidth=0.4,
+            zorder=4,
         )
     ax_box.axhline(y=0, color="red", linestyle="-", linewidth=1)
     ax_box.text(
-        0.02, 0.97, f"$\\text{{H}}_\\text{{PS}}$ = {format_return(heuristic_score)}",
-        transform=ax_box.transAxes, ha="left", va="top", color="red", fontsize=7,
+        0.02,
+        0.97,
+        f"$\\text{{H}}_\\text{{PS}}$ = {format_return(heuristic_score)}",
+        transform=ax_box.transAxes,
+        ha="left",
+        va="top",
+        color="red",
+        fontsize=7,
         fontweight="bold",
     )
     ax_box.set_xticks(range(len(ranking)))
@@ -1133,7 +1112,7 @@ def create_vdn_tuning_figure(
             mpatches.Patch(facecolor="white", edgecolor="0.25", linewidth=1),
             mlines.Line2D([], [], color="0.25", linewidth=1),
             mlines.Line2D([], [], color="0.25", linewidth=1, marker="|", markersize=5),
-            mlines.Line2D([], [], linestyle="", marker="o", markersize=2.5, color="#3a3a3a"),
+            mlines.Line2D([], [], linestyle="", marker="o", markersize=2.5, color=EDGE),
             mlines.Line2D([], [], color="red", linewidth=1),
         ],
         labels=[
@@ -1165,17 +1144,24 @@ def create_vdn_tuning_figure(
 
 
 def create_vdn_transfer_figure(
-    baseline_heuristic_values, filename="Figure_9_VDN_Rank1_vs_Rank5", figsize=(3.8, 2.8)
+    baseline_heuristic_values,
+    filename="Figure_9_VDN_Rank1_vs_Rank5",
+    figsize=(3.8, 2.8),
 ):
     """Selected configuration (rank 1) vs. rank 5 on Cologne and CologneBonnDusseldorf,
-    with and without the budget constraint. One panel per map, map name on top as in Figure 4."""
+    with and without the budget constraint. One panel per map, map name on top as in Figure 4.
+    """
     plt.rcParams.update(PLOT_PARAMS)
     fig, axes = plt.subplots(1, 2, figsize=figsize, sharey=True)
     y_floor, y_top = -40, 25
     width = 0.32
     maps = [
         (axes[0], "Cologne-v1", ENV_PLOT_TITLES["Cologne-v1"]),
-        (axes[1], "CologneBonnDusseldorf-v1", ENV_PLOT_TITLES["CologneBonnDusseldorf-v1"]),
+        (
+            axes[1],
+            "CologneBonnDusseldorf-v1",
+            ENV_PLOT_TITLES["CologneBonnDusseldorf-v1"],
+        ),
     ]
     for ax, env, title in maps:
         for x, scenario in enumerate([env, f"{env}-unconstrained"]):
@@ -1197,8 +1183,14 @@ def create_vdn_transfer_figure(
     # Box-plot elements are explained in the legend of the tuning figure; only the ranks here
     axes[0].legend(
         handles=[
-            mpatches.Patch(facecolor=VDN_COLORS["Rank 1"], edgecolor="#3a3a3a", label="Rank 1 (selected)"),
-            mpatches.Patch(facecolor=VDN_COLORS["alternative"], edgecolor="#3a3a3a", label="Rank 5"),
+            mpatches.Patch(
+                facecolor=VDN_COLORS["Rank 1"],
+                edgecolor=EDGE,
+                label="Rank 1 (selected)",
+            ),
+            mpatches.Patch(
+                facecolor=VDN_COLORS["alternative"], edgecolor=EDGE, label="Rank 5"
+            ),
         ],
         loc="lower left",
         frameon=False,
@@ -1210,10 +1202,13 @@ def create_vdn_transfer_figure(
 
 
 def create_vdn_cbd_unconstrained_figure(
-    baseline_heuristic_values, filename="Figure_10_VDN_CBD_Unconstrained", figsize=(3.6, 2.35)
+    baseline_heuristic_values,
+    filename="Figure_10_VDN_CBD_Unconstrained",
+    figsize=(3.6, 2.35),
 ):
     """Next-best tuning ranks and variants of the selected VDN configuration on
-    unconstrained CologneBonnDusseldorf. Hyperparameters are in a LaTeX table next to it."""
+    unconstrained CologneBonnDusseldorf. Hyperparameters are in a LaTeX table next to it.
+    """
     plt.rcParams.update(PLOT_PARAMS)
     fig, ax = plt.subplots(figsize=figsize)
     y_floor, y_top = -40, 5
@@ -1221,17 +1216,34 @@ def create_vdn_cbd_unconstrained_figure(
     variants = load_vdn_variants(env, baseline_heuristic_values[env])
     order = [label for label in VDN_CBD_ORDER if label in variants]
     colors = [
-        VDN_COLORS["Rank 1"] if label == "Rank 1"
-        else VDN_COLORS["single"] if label in ("LR only", "Hidden only")
-        else VDN_COLORS["100M steps"] if label == "100M steps"
-        else VDN_COLORS["alternative"]
+        (
+            VDN_COLORS["Rank 1"]
+            if label == "Rank 1"
+            else (
+                VDN_COLORS["single"]
+                if label in ("LR only", "Hidden only")
+                else (
+                    VDN_COLORS["100M steps"]
+                    if label == "100M steps"
+                    else VDN_COLORS["alternative"]
+                )
+            )
+        )
         for label in order
     ]
-    draw_min_max_boxes(ax, [variants[l] for l in order], range(len(order)), colors, y_floor)
+    draw_min_max_boxes(
+        ax, [variants[l] for l in order], range(len(order)), colors, y_floor
+    )
     ax.set_xticks(range(len(order)))
     ax.set_xticklabels(
-        [f"{l}\n(selected)" if l == "Rank 1" else l.replace(" only", "\nonly").replace(" steps", "\nsteps")
-         for l in order],
+        [
+            (
+                f"{l}\n(selected)"
+                if l == "Rank 1"
+                else l.replace(" only", "\nonly").replace(" steps", "\nsteps")
+            )
+            for l in order
+        ],
         fontsize=6,
     )
     style_vdn_axis(ax, y_floor, y_top, [-40, -30, -20, -10, 0])
@@ -1292,14 +1304,14 @@ def create_speedup_figure(filename="Figure_3_JAX_Speedup", figsize=(3.0, 2.0)):
             "",
             xy=(x_arrow, t_to),
             xytext=(x_arrow, t_from),
-            arrowprops=dict(
-                arrowstyle="-|>",
-                color="black",
-                lw=0.7,
-                mutation_scale=5,
-                shrinkA=0,
-                shrinkB=0,
-            ),
+            arrowprops={
+                "arrowstyle": "-|>",
+                "color": "black",
+                "lw": 0.7,
+                "mutation_scale": 5,
+                "shrinkA": 0,
+                "shrinkB": 0,
+            },
         )
         # Label resting on the dotted level, ending at the arrow
         ax.text(
@@ -1316,10 +1328,17 @@ def create_speedup_figure(filename="Figure_3_JAX_Speedup", figsize=(3.0, 2.0)):
     for method, (label, color) in methods.items():
         times = [ROLLOUT_TIMES[env][method] for env in envs]
         bars = ax.bar(
-            x + offsets[method], times, 0.85 * width, label=label, color=color,
-            edgecolor=BAR_EDGE, linewidth=0.6,
+            x + offsets[method],
+            times,
+            0.85 * width,
+            label=label,
+            color=color,
+            edgecolor=BAR_EDGE,
+            linewidth=0.6,
         )
-        ax.bar_label(bars, labels=[format_duration(t) for t in times], padding=1, fontsize=5)
+        ax.bar_label(
+            bars, labels=[format_duration(t) for t in times], padding=1, fontsize=5
+        )
     for i, env in enumerate(envs):
         draw_speedup_arrow(
             x[i] + offsets["numpy"],
@@ -1333,16 +1352,33 @@ def create_speedup_figure(filename="Figure_3_JAX_Speedup", figsize=(3.0, 2.0)):
     x_train = x_split + 0.6
     # Hatched and unfilled: same NumPy/JAX colours, marking training rather than rollouts
     train_bars = [
-        (x_train - width / 2, VDN_TRAINING_TIMES["numpy_epymarl"], methods["numpy"][1],
-         "EPyMARL + NumPy IMP-act"),
-        (x_train + width / 2, VDN_TRAINING_TIMES["jax_jaxmarl"], methods["jax"][1],
-         "JaxMARL + JAX IMP-act"),
+        (
+            x_train - width / 2,
+            VDN_TRAINING_TIMES["numpy_epymarl"],
+            methods["numpy"][1],
+            "EPyMARL + NumPy IMP-act",
+        ),
+        (
+            x_train + width / 2,
+            VDN_TRAINING_TIMES["jax_jaxmarl"],
+            methods["jax"][1],
+            "JaxMARL + JAX IMP-act",
+        ),
     ]
     for x_bar, t, color, framework in train_bars:
         # Hatch in the bar colour, outline dark as for the rollout bars
-        ax.bar(x_bar, t, 0.85 * width, facecolor="white", edgecolor=color, hatch="//////",
-               linewidth=0)
-        bars = ax.bar(x_bar, t, 0.85 * width, facecolor="none", edgecolor=BAR_EDGE, linewidth=0.6)
+        ax.bar(
+            x_bar,
+            t,
+            0.85 * width,
+            facecolor="white",
+            edgecolor=color,
+            hatch="//////",
+            linewidth=0,
+        )
+        bars = ax.bar(
+            x_bar, t, 0.85 * width, facecolor="none", edgecolor=BAR_EDGE, linewidth=0.6
+        )
         ax.bar_label(bars, labels=[format_duration(t)], padding=1, fontsize=5)
         ax.text(
             x_bar,
@@ -1352,7 +1388,7 @@ def create_speedup_figure(filename="Figure_3_JAX_Speedup", figsize=(3.0, 2.0)):
             ha="center",
             va="bottom",
             fontsize=5,
-            bbox=dict(facecolor="white", edgecolor="none", pad=0.6),
+            bbox={"facecolor": "white", "edgecolor": "none", "pad": 0.6},
         )
     draw_speedup_arrow(
         train_bars[0][0],
@@ -1382,7 +1418,15 @@ def create_speedup_figure(filename="Figure_3_JAX_Speedup", figsize=(3.0, 2.0)):
     ax.set_ylim(1, 3e7)
     ax.set_xlim(x[0] - 0.65, x_train + 0.75)
     # Human-readable durations instead of powers of ten
-    duration_ticks = {1: "1 s", 10: "10 s", 60: "1 min", 600: "10 min", 3600: "1 h", 86400: "1 day", 864000: "10 days"}
+    duration_ticks = {
+        1: "1 s",
+        10: "10 s",
+        60: "1 min",
+        600: "10 min",
+        3600: "1 h",
+        86400: "1 day",
+        864000: "10 days",
+    }
     ax.set_yticks(list(duration_ticks))
     ax.set_yticklabels(list(duration_ticks.values()), fontsize=6)
     ax.yaxis.set_minor_locator(mticker.NullLocator())
@@ -1401,7 +1445,9 @@ def create_speedup_figure(filename="Figure_3_JAX_Speedup", figsize=(3.0, 2.0)):
     ax.set_axisbelow(True)
     handles, labels = ax.get_legend_handles_labels()
     handles.append(
-        mpatches.Patch(facecolor="white", edgecolor=BAR_EDGE, hatch="//////", linewidth=0.6)
+        mpatches.Patch(
+            facecolor="white", edgecolor=BAR_EDGE, hatch="//////", linewidth=0.6
+        )
     )
     labels.append("Training, NVIDIA RTX 4090 GPU (Appendix D)")
     ax.legend(
@@ -1422,31 +1468,332 @@ def create_speedup_figure(filename="Figure_3_JAX_Speedup", figsize=(3.0, 2.0)):
     print(f"Figures saved to {FIGURES_DIR}")
 
 
-def main():
+# Figure 11: one episode of the best VDN policy on Cologne-v1. The episode and segment were
+# chosen by inspection among episodes near the median return (episode 257 is at the median):
+# the segment's traffic responds to maintenance, the budget rejects several of its proposed
+# repairs, and the environment finally forces a replacement that overrides the policy's major
+# repair.
+def create_figure_11(
+    filename="Figure_11",
+    map_name="Cologne-v1",
+    alg="vdn_rnn",
+    num_episodes=1_000,
+    rollout_key=42,
+    episode=257,
+    segment=51,
+    figsize=(6.5, 8.2),
+):
+    """Rolls out the best final-run checkpoint of `alg` (rank 1 in results.csv, downloaded
+    from Zenodo if missing) and plots one episode for one segment.
+
+    Needs JAX for the rollouts, and geopandas, shapely and contextily for the map (the
+    basemap tiles are downloaded; offline, the map is drawn without them).
+    """
+    import contextily as cx
+    import geopandas as gpd
+    import jax
+    import matplotlib.patheffects as pe
+    from get_and_plot_rollouts import ACTIONS, RolloutDataGenerator
+    from shapely.geometry import LineString, Point
+
+    plt.rcParams.update(PLOT_PARAMS)
+
+    # Rollouts
+    best, checkpoint_folder = best_checkpoint(map_name, alg)
+    print(f"Checkpoint: {checkpoint_folder}")
+    rdg = RolloutDataGenerator(
+        map_name,
+        alg,
+        test_num_envs=num_episodes,
+        checkpoint_id=int(best["checkpoint_step"]),
+        checkpoint_path=str(checkpoint_folder),
+    )
+    data = jax.tree.map(np.asarray, rdg.generate_rollout_data(jax.random.PRNGKey(rollout_key)))
+    env = rdg.road_env
+
+    returns = data["reward"].sum(axis=1)
+    print(f"Seed {best['seed']}, checkpoint {best['checkpoint_step']}")
+    print(f"Mean return {returns.mean():.4e} (logged evaluation: {float(best['mean']):.4e})")
+
+    # Episode and segment to show
+    ep = {k: v[episode] for k, v in data.items()}
+    rejected = ep["action"] != ep["applied_actions"]  # (T, N)
+    forced = ep["forced_repair_flags"].astype(bool)  # (T, N)
+    utilisation = ep["traffic_volumes"][0] / np.asarray(env.initial_capacities)
+    print(f"Episode {episode}: return {returns[episode]:.4e} "
+          f"({(returns < returns[episode]).mean():.0%} of episodes are worse)")
+    print(f"Segment {segment}: initial volume/capacity {utilisation[segment]:.0%}")
+    print("  rejected proposals (t, proposed -> executed):",
+          [(int(t), int(ep["action"][t, segment]), int(ep["applied_actions"][t, segment]))
+           for t in np.where(rejected[:, segment])[0]])
+    print("  forced replacements at t =", np.where(forced[:, segment])[0].tolist())
+    print("  unsafe (failed) state at t =",
+          np.where(ep["edge_states"][:, segment] == env.num_damage_states - 1)[0].tolist())
+    print("  network forced replacements (t: count):",
+          {int(t): int(c) for t, c in enumerate(ep["forced_replace_constraint_applied"]) if c})
+
+    T = env.max_timesteps
+    t_state = np.arange(T + 1)  # states, beliefs, budget
+    t_act = np.arange(T)  # actions and traffic
+
+    def style_axis(ax, xlabel=False):
+        """Full frame and light grid, with budget renewals as dashed grey lines."""
+        ax.set_xlim(-0.5, T + 0.5)
+        ax.set_xticks(np.arange(0, T + 1, 5))
+        ax.tick_params(labelbottom=xlabel)
+        ax.grid(True, alpha=0.3)
+        ax.set_axisbelow(True)
+        for t in range(0, T, env.budget_renewal_interval):
+            ax.axvline(t, color="gray", linestyle="--", linewidth=0.8, alpha=0.6, zorder=0)
+
+    def mark_actions(ax, actions, y, skip=(), **kwargs):
+        for a, (_, style) in ACTIONS.items():
+            t = np.where(actions == a)[0]
+            if a not in skip:
+                ax.plot(t, np.full(len(t), y), linestyle="", **style, **kwargs)
+
+    def plot_map(ax):
+        graph = env.graph
+
+        def xy(v):
+            return (float(v["position_x"]), float(v["position_y"]))
+
+        nodes = gpd.GeoDataFrame(geometry=[Point(xy(v)) for v in graph.vs], crs="EPSG:4326")
+        edges = gpd.GeoDataFrame(
+            {"util": 100 * utilisation},
+            geometry=[LineString([xy(graph.vs[e.source]), xy(graph.vs[e.target])]) for e in graph.es],
+            crs="EPSG:4326",
+        )
+        nodes, edges = nodes.to_crs(epsg=3857), edges.to_crs(epsg=3857)
+
+        # Square, slightly zoomed-in extent
+        minx, miny, maxx, maxy = edges.total_bounds
+        cx_, cy_, half = (minx + maxx) / 2, (miny + maxy) / 2, 0.46 * max(maxx - minx, maxy - miny)
+        ax.set_xlim(cx_ - half, cx_ + half)
+        ax.set_ylim(cy_ - half, cy_ + half)
+        ax.set_aspect("equal")
+        ax.axis("off")
+        try:
+            cx.add_basemap(ax, source=cx.providers.Esri.WorldTopoMap, zoom=12,
+                           attribution=False, reset_extent=False, zorder=0)
+        except OSError as err:  # offline: plot without basemap
+            print(f"Basemap skipped: {err}")
+
+        # Volume / capacity: light orange (free flow) through red to purple (congested)
+        cmap = mcolors.LinearSegmentedColormap.from_list("traffic", [
+            "#fbc17b", "#fab06e", "#f8945c", "#f57a50", "#f06149", "#e74949",
+            "#d73751", "#c42c5b", "#ad2363", "#971f6a", "#841b6d",
+        ])
+        norm = mcolors.Normalize(edges.util.min(), edges.util.max())
+        edges.plot(ax=ax, color=cmap(norm(edges.util)), linewidth=1.2, zorder=1)
+        nodes.plot(ax=ax, markersize=8, facecolor="white", edgecolor="black", linewidth=0.4, zorder=2)
+
+        # IDs of the busiest nodes (trips from and to the node), to link the map to panel (b)
+        trips = np.asarray(env.trips, dtype=float)
+        for v in np.argsort(-(trips.sum(0) + trips.sum(1)))[:6]:
+            pt = nodes.geometry.iloc[v]
+            ax.annotate(str(v), (pt.x, pt.y), xytext=(3, 3), textcoords="offset points", fontsize=6,
+                        fontweight="bold", zorder=4,
+                        path_effects=[pe.withStroke(linewidth=1.5, foreground="white")])
+
+        # Highlight the analysed segment
+        geom = edges.geometry.iloc[segment]
+        edges.iloc[[segment]].plot(ax=ax, color="black", linewidth=2.4, zorder=1.5)
+        mid = geom.interpolate(0.5, normalized=True)
+        # Label offset to the side facing the map centre, so it stays inside the map
+        label = min(
+            (geom.parallel_offset(17_000, side).interpolate(0.5, normalized=True)
+             for side in ("left", "right")),
+            key=lambda pt: pt.distance(Point(cx_, cy_)),
+        )
+        ax.plot([mid.x, label.x], [mid.y, label.y], color="black", linewidth=0.6, zorder=3)
+        ax.text(label.x, label.y, str(segment), ha="center", va="center", fontsize=7, zorder=5,
+                bbox={"boxstyle": "circle,pad=0.3", "facecolor": "white", "edgecolor": "black",
+                      "linewidth": 0.6})
+
+        cbar = plt.colorbar(plt.cm.ScalarMappable(norm, cmap), ax=ax, fraction=0.046, pad=0.03)
+        cbar.outline.set_visible(False)
+        cbar.set_label("Initial Volume / Capacity (%)")
+        # Attribution inside the map, bottom left (clear of the network)
+        ax.text(0.02, 0.02, r"Map data from $\bf{OpenStreetMap}$", transform=ax.transAxes,
+                ha="left", va="bottom", fontsize=5, color="0.3", zorder=5,
+                bbox={"facecolor": "white", "alpha": 0.7, "edgecolor": "none", "pad": 1})
+
+        # Network facts right next to the map (part of the map axes, so the layout keeps them close)
+        ax.text(-0.04, 0.5, "\n".join([
+            f"Nodes: {graph.vcount()}",
+            f"Segments (agents): {env.num_edges}",
+            f"OD pairs: {int((np.asarray(env.trips) > 0).sum())}",
+            "",
+            f"Budget: {float(env.budget_amount) / 1e6:.0f}M",
+            f"Renewal: every {env.budget_renewal_interval} years",
+        ]), transform=ax.transAxes, ha="right", va="center", fontsize=7)
+        ax.set_title(rf"(a) {tt('Cologne')} road network")
+
+    def plot_od_matrix(ax):
+        trips = np.array(env.trips, dtype=float)
+        trips[trips <= 0] = np.nan
+        n = trips.shape[0]
+        mesh = ax.pcolormesh(trips, cmap="inferno", norm=mcolors.LogNorm(1, np.nanmax(trips)))
+        ax.plot([0, n], [0, n], color=EDGE, linewidth=0.6, linestyle="--")
+        ax.set_aspect("equal")
+        ticks = np.arange(0, n, 5)
+        ax.set_xticks(ticks + 0.5, ticks)
+        ax.set_yticks(ticks + 0.5, ticks)
+        ax.grid(True, alpha=0.3)
+        ax.set_axisbelow(True)
+        ax.set_xlabel("Destination Node")
+        ax.set_ylabel("Origin Node")
+        cbar = plt.colorbar(mesh, ax=ax, fraction=0.046, pad=0.03)
+        cbar.outline.set_visible(False)
+        cbar.set_label("Trips")
+        cbar.ax.minorticks_off()
+        ax.set_title("(b) Travel demand (origin-destination matrix)")
+
+    def plot_budget(ax):
+        used = 100 * (1 - ep["budget_remaining"] / float(env.budget_amount))
+        ax.plot(t_state, used, "-o", color=DARK, linewidth=1.2, markersize=2.5,
+                markerfacecolor="white", markeredgewidth=0.8)
+        for t, count in enumerate(ep["forced_replace_constraint_applied"]):
+            if count:
+                ax.plot(t, 112, "*", color="red", markersize=6)
+                ax.text(t, 119, str(int(count)), color="red", fontsize=6, fontweight="bold",
+                        ha="center", va="bottom")
+        ax.set_ylim(-5, 135)
+        ax.set_yticks([0, 50, 100])
+        ax.set_ylabel("Budget Used (%)")
+        style_axis(ax)
+        ax.legend(handles=[
+            mlines.Line2D([], [], color=DARK, marker="o", markersize=2.5, markerfacecolor="white",
+                          label="Budget used"),
+            mlines.Line2D([], [], color="gray", linestyle="--", linewidth=0.8, label="Budget renewal"),
+            mlines.Line2D([], [], color="red", marker="*", linestyle="", markersize=6,
+                          label="Forced replacements (count)"),
+            mpatches.Patch(facecolor="red", alpha=0.25, label="Rejected proposals (count)"),
+            mlines.Line2D([], [], marker="v", color="black", linestyle="", markersize=3,
+                          label=f"Segment {segment} rejected"),
+        ], loc="lower center", bbox_to_anchor=(0.5, 0.97), ncol=3, frameon=False,
+            columnspacing=0.8, handlelength=1.4)
+        ax.set_title("(c) Network budget usage", pad=30)
+
+        # Proposals rejected by the budget across all segments (forced replacements excluded)
+        budget_rejected = (rejected & ~forced).sum(axis=1)
+        ax_rej = ax.twinx()
+        ax_rej.bar(t_act, budget_rejected, width=0.7, color="red", alpha=0.25, zorder=0)
+        ax_rej.set_ylim(0, 3 * budget_rejected.max())
+        ax_rej.set_ylabel("Rejected\nProposals", color="red", alpha=0.7)
+        ax_rej.tick_params(axis="y", colors="red", labelsize=6)
+        seg_rejected = np.where(rejected[:, segment] & ~forced[:, segment])[0]
+        ax_rej.plot(seg_rejected, budget_rejected[seg_rejected] + 0.06 * ax_rej.get_ylim()[1], "v",
+                    color="black", markersize=3)
+        ax.set_zorder(ax_rej.get_zorder() + 1)  # budget line on top of the bars
+        ax.patch.set_visible(False)
+
+    def plot_segment_series(ax, values, color, marker, ylabel, title):
+        pct = 100 * values
+        ax.axhline(100, color="black", linestyle=":", linewidth=0.8)
+        ax.plot(t_act, pct, color=color, marker=marker, linewidth=1.2, markersize=2.5,
+                markerfacecolor="white", markeredgewidth=0.8)
+        lo, hi = min(pct.min(), 100), max(pct.max(), 100)
+        pad = max(2.0, 0.08 * (hi - lo))
+        ax.set_ylim(lo - pad, hi + 3 * pad)
+        mark_actions(ax, ep["applied_actions"][:, segment], hi + 2 * pad, skip=(0,))
+        ax.set_ylabel(ylabel)
+        style_axis(ax)
+        ax.set_title(title)
+
+    def plot_deterioration(ax):
+        S = env.num_damage_states
+        ax.pcolormesh(t_state, np.arange(S), ep["edge_beliefs"][:, segment, :].T, shading="nearest",
+                      cmap="Greys", vmin=0, vmax=1, alpha=0.35, edgecolors="none")
+        ax.plot(t_state, ep["edge_states"][:, segment], color="black", linewidth=1.4)
+        ax.plot(t_state, ep["edge_observations"][:, segment], "-o", color=GOLD,
+                markersize=2, linewidth=0.7)
+        for t in np.where(ep["edge_states"][:, segment] == S - 1)[0]:
+            ax.axvline(t, color="red", linestyle="--", linewidth=1.0)
+        # Terminal state (t = T): no action is taken, only the terminal reward applies
+        ax.axvspan(T - 0.5, T + 0.5, facecolor="none", edgecolor="0.7", hatch="////", linewidth=0)
+        # Damage states as in the paper's Table 2: 1 (worst) to 5 (Very Good), best at the top
+        ax.set_ylim(S - 0.5, -0.5)
+        ax.set_yticks(np.arange(S), S - np.arange(S))
+        ax.set_ylabel("Damage State")
+        style_axis(ax)
+        ax.set_title(f"(f) Segment {segment}: deterioration, inspection and maintenance")
+
+    def plot_action_strip(ax):
+        mark_actions(ax, ep["action"][:, segment], 1, alpha=0.4)
+        mark_actions(ax, ep["applied_actions"][:, segment], 0)
+        for t in np.where(rejected[:, segment])[0]:
+            ax.axvspan(t - 0.5, t + 0.5, color="red", alpha=0.12, linewidth=0)
+        ax.set_ylim(-0.6, 1.6)
+        ax.set_yticks([0, 1], ["Executed", "Proposed"])
+        ax.tick_params(axis="y", length=0)
+        style_axis(ax, xlabel=True)
+        ax.grid(False, axis="y")
+        ax.set_xlabel("Timestep")
+        ax.legend(handles=[
+            mlines.Line2D([], [], color="black", linewidth=1.4, label="True damage state"),
+            mlines.Line2D([], [], color=GOLD, marker="o", markersize=2, linewidth=0.7,
+                          label="Observation"),
+            mpatches.Patch(facecolor="0.6", alpha=0.35, label="Belief"),
+            mlines.Line2D([], [], color="red", linestyle="--", label="Unsafe state"),
+            mpatches.Patch(facecolor="red", alpha=0.12, label="Proposal overridden"),
+            mpatches.Patch(facecolor="none", edgecolor="0.7", hatch="////", linewidth=0,
+                           label="Terminal state"),
+            *[mlines.Line2D([], [], linestyle="", label=label, **style)
+              for label, style in ACTIONS.values()],
+        ], loc="upper center", bbox_to_anchor=(0.5, -0.9), ncol=6, frameon=False,
+            columnspacing=0.8, handlelength=1.4, handletextpad=0.4)
+
+    # Figure
+    fig = plt.figure(figsize=figsize, layout="constrained")
+    fig_top, fig_bottom = fig.subfigures(2, 1, height_ratios=[1, 2.35])
+    ax_map, ax_od = fig_top.subplots(1, 2)
+    plot_map(ax_map)
+    plot_od_matrix(ax_od)
+    gs = fig_bottom.add_gridspec(5, 1, height_ratios=[0.8, 0.75, 0.75, 0.75, 0.35])
+    plot_budget(fig_bottom.add_subplot(gs[0]))
+    plot_segment_series(
+        fig_bottom.add_subplot(gs[1]),
+        ep["travel_times"][:, segment] / np.asarray(env.initial_btts)[segment],
+        DARK, "x",
+        "Travel Time (%)",
+        f"(d) Segment {segment}: travel time (% of base travel time)",
+    )
+    plot_segment_series(
+        fig_bottom.add_subplot(gs[2]),
+        ep["traffic_volumes"][:, segment] / np.asarray(env.initial_capacities)[segment],
+        TEAL, "o", "Volume (%)",
+        f"(e) Segment {segment}: traffic volume (% of capacity)",
+    )
+    ax_det = fig_bottom.add_subplot(gs[3])
+    plot_deterioration(ax_det)
+    plot_action_strip(fig_bottom.add_subplot(gs[4], sharex=ax_det))
+    fig_bottom.align_ylabels()
+
+    # Only the basemap is raster: 300 dpi keeps the PDF ~0.5 MB
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    fig.savefig(FIGURES_DIR / f"{filename}.pdf", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Figure saved to {FIGURES_DIR / filename}.pdf")
+
+
+def main(skip_figure_11=False):
     create_speedup_figure()
 
-    data, baseline_heuristic_values = load_data()
+    data = load_results()
+    baseline_heuristic_values = baseline_values()
     create_vdn_tuning_figure(baseline_heuristic_values)
     create_vdn_transfer_figure(baseline_heuristic_values)
     create_vdn_cbd_unconstrained_figure(baseline_heuristic_values)
 
     environments = data["map_name"].unique()
     best_checkpoints_all = {
-        env: get_best_checkpoints(
-            data[data["map_name"] == env], env, baseline_heuristic_values
-        )
-        for env in environments
+        env: get_best_checkpoints(data, env) for env in environments
     }
 
     envs_to_plot = ["ToyExample-v2", "Cologne-v1", "CologneBonnDusseldorf-v1"]
-    algorithms_to_plot = [
-        "vdn_rnn",
-        "vdn_ba_rnn",
-        "qmix_rnn",
-        "pqn_rnn",
-        "mappo_rnn",
-        "ippo_rnn",
-    ]
+    algorithms_to_plot = ALGORITHMS
 
     create_plots(
         best_checkpoints_all,
@@ -1497,7 +1844,8 @@ def main():
         show_percentages=False,
         y_lims=(-40, 30),
         env_colors=env_colors,
-        full_legend=True,        title_fontsize=8,  # fits the typewriter "Cologne" in the four titles
+        full_legend=True,
+        title_fontsize=8,  # fits the typewriter "Cologne" in the four titles
     )
 
     create_plots(
@@ -1513,14 +1861,7 @@ def main():
     create_plots_combined(
         best_checkpoints_all,
         base_envs=["ToyExample-v2", "Cologne-v1", "CologneBonnDusseldorf-v1"],
-        algorithms_to_plot=[
-            "vdn_rnn",
-            "vdn_ba_rnn",
-            "qmix_rnn",
-            "pqn_rnn",
-            "mappo_rnn",
-            "ippo_rnn",
-        ],
+        algorithms_to_plot=ALGORITHMS,
         filename="Figure_4_Envs_Constrained_vs_Unconstrained",
         y_lims=(-40, 35),  # headroom for the H_PS and budget labels
         show_baseline=True,
@@ -1528,14 +1869,7 @@ def main():
     )
 
     # Training curves: constrained vs unconstrained per map, and the Cologne budget scenarios
-    curve_algorithms = [
-        "vdn_rnn",
-        "vdn_ba_rnn",
-        "qmix_rnn",
-        "pqn_rnn",
-        "mappo_rnn",
-        "ippo_rnn",
-    ]
+    curve_algorithms = ALGORITHMS
     # Budgets from the imp-act presets (budget_amount)
     # Map (with agents) per row, scenario per panel
     curve_maps = {
@@ -1579,6 +1913,14 @@ def main():
         figsize=(7.0, 5.2),
     )
 
+    if not skip_figure_11:
+        create_figure_11()
+
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--skip-figure-11", action="store_true",
+                        help="skip Figure 11, which needs JAX and the released checkpoint")
+    main(skip_figure_11=parser.parse_args().skip_figure_11)
