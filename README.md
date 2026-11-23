@@ -12,33 +12,35 @@ cd imp-act-JaxMARL && git checkout submission
 git clone https://github.com/AI-for-Infrastructure-Management/imp-act.git
 ```
 
-### 2. Create a virtual environment
+### 2. Install the dependencies
 
-**Option A:** Create a conda environment using the environment YAML file,
+The dependencies of JaxMARL and IMP-act are pinned to the versions used for the final runs of the paper, both in `uv.lock` for [uv](https://docs.astral.sh/uv/) and in [requirements/](requirements/) for pip, with `cpu.txt` for the CPU version and `gpu.txt` for the GPU version. We recommend installing them with uv, which also installs Python 3.10 and is considerably faster than pip, particularly for the CUDA packages of the GPU version. Alternatively, the same versions can be installed with pip.
+
+**Option A: uv (recommended)**
+
+After [installing uv](https://docs.astral.sh/uv/getting-started/installation/), create the virtual environment `.venv` in the repository root and install the dependencies of the CPU version,
 ```bash
-conda env create -f conda_environment.yaml
-conda activate impact-jaxmarl-env
+uv sync --all-extras
+source .venv/bin/activate
 ```
 
-**Option B:** Alternatively, create a virtual environment `impact-jaxmarl-env` with Python 3.10 (e.g., using venv) and install Poetry,
+The GPU version requires a Linux machine with an NVIDIA GPU and CUDA >= 12.8. To this end, the `cuda` dependency group adds the CUDA build of JAX,
 ```bash
-pip install poetry==1.7.1 lockfile==0.12.2
+uv sync --all-extras --group cuda
+source .venv/bin/activate
+python -c "import jax; print(jax.devices())"  # should return something like [cuda(id=0)]
 ```
 
-### 3. Install dependencies
+**Option B: pip**
 
-**Option A: JAX CPU version**
-
-Install the dependencies of JaxMARL using `pyproject.toml`,
+If uv is not available, the pinned versions can be installed with pip into a virtual environment created with Python 3.10 (e.g. from a system installation or a module on a computing cluster),
 ```bash
-pip install -e ".[algs]"
+python3.10 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements/cpu.txt  # or requirements/gpu.txt for the GPU version
+pip install --no-deps -e . -e ./imp-act
 ```
 
-and the dependencies of IMP-act,
-```bash
-cd imp-act && git checkout main
-poetry install --with dev,vis,jax
-```
 <details>
 <summary>Optional: Troubleshooting and Additional Notes</summary>
 
@@ -47,34 +49,23 @@ poetry install --with dev,vis,jax
     sudo apt-get install cmake  # For Ubuntu/Debian
     brew install cmake          # For macOS
     ```
+- Both options install JaxMARL and IMP-act in editable mode. With pip, the `--no-deps` flag ensures that only the pinned versions in `requirements/` are installed.
+- After changing the dependencies in `pyproject.toml`, `uv lock` updates `uv.lock`, and the commands in the headers of `requirements/cpu.txt` and `requirements/gpu.txt` export the new versions for pip.
 </details>
 
-**Option B: JAX GPU version**
-
-The GPU version requires JAX with CUDA support (CUDA >= 12.8). To this end, replace `"jax==0.4.30"` with `"jax[cuda12]==0.4.30"` in `pyproject.toml` before installing the dependencies of JaxMARL, and install IMP-act with the `jax_gpu` group,
-
-```bash
-pip install -e ".[algs]"
-python -c "import jax; print(jax.devices())"  # should return something like [cuda(id=0)]
-
-cd imp-act && git checkout main
-poetry install --with dev,vis,jax_gpu
-```
-
-<details> 
+<details>
 <summary>vast.ai GPU instance</summary>
 
-Alternatively, a GPU instance can be created on vast.ai using the pre-built Docker image `omniscientoctopus/imp-act-jaxmarl`. When creating the instance, make sure to filter for GPUs with CUDA >= 12.8. The installation can then be checked with the examples below,
+Alternatively, a GPU instance can be created on vast.ai using the pre-built Docker image `omniscientoctopus/imp-act-jaxmarl`. When creating the instance, make sure to filter for GPUs with CUDA >= 12.8. The virtual environment of the image is activated by default, and the installation can then be checked with the examples below,
 
 ```bash
-cd imp-act-JaxMARL && conda activate impact-jaxmarl-env
+cd /workspace/imp-act-JaxMARL
 ```
 </details>
 
-### 4. Examples
+### 3. Examples
 The following examples check the installation of JaxMARL and of IMP-act with JaxMARL,
 ```bash
-cd ..  # return to imp-act-JaxMARL
 python experiments/example_mpe.py  # checks the JaxMARL installation
 python experiments/example_road_env.py  # checks the IMP-act + JaxMARL installation
 ```

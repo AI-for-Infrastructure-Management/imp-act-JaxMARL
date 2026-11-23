@@ -51,21 +51,18 @@ W&B project (compare runs by test_returned_episode_returns)
 ## 0. One-time setup
 
 The sweep scripts expect a Python 3.10 venv at `.venv` in the repo root, with
-the project (CUDA JAX build) and the `imp-act` submodule installed. Using
-[uv](https://docs.astral.sh/uv/), from the repo root:
+the pinned GPU dependencies of `uv.lock`, the project and the `imp-act`
+submodule installed. Using [uv](https://docs.astral.sh/uv/), from the repo root:
 
 ```bash
-uv venv --python 3.10 "/scratch/${USER}/imp-act-jaxmarl/.venv"  # venv on scratch (fast I/O)
-ln -s "/scratch/${USER}/imp-act-jaxmarl/.venv" .venv            # symlink into the repo
+mkdir -p "/scratch/${USER}/imp-act-jaxmarl/.venv"
+ln -s "/scratch/${USER}/imp-act-jaxmarl/.venv" .venv  # venv on scratch (fast I/O)
+uv sync --all-extras --group cuda                     # pinned versions of the final runs (CUDA JAX build)
 source .venv/bin/activate
-
-uv pip install -e ".[algs]"
-uv pip install "jax[cuda12]==0.4.30"   # swap in the CUDA build (same version as pyproject.toml)
-uv pip install -r imp-act/requirements/requirements.txt
-uv pip install -e ./imp-act
 ```
 
-Plain `python -m venv` + `pip` works the same way if uv is not available.
+If uv is not available, the same versions can be installed with `python -m venv`
+and pip from `requirements/gpu.txt` (see the README).
 Check GPU visibility on a compute node with
 `python -c 'import jax; print(jax.devices())'`.
 
