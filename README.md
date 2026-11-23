@@ -14,7 +14,7 @@ git clone https://github.com/AI-for-Infrastructure-Management/imp-act.git
 
 ### 2. Install the dependencies
 
-The dependencies of JaxMARL and IMP-act are pinned to the versions used for the final runs of the paper, both in `uv.lock` for [uv](https://docs.astral.sh/uv/) and in [requirements/](requirements/) for pip, with `cpu.txt` for the CPU version and `gpu.txt` for the GPU version. We recommend installing them with uv, which also installs Python 3.10 and is considerably faster than pip, particularly for the CUDA packages of the GPU version. Alternatively, the same versions can be installed with pip.
+The dependencies are pinned to the versions used for the final runs of the paper, in `uv.lock` for [uv](https://docs.astral.sh/uv/) and in [requirements/](requirements/) for pip. We recommend uv, which also installs Python 3.10 and is considerably faster than pip.
 
 **Option A: uv (recommended)**
 
