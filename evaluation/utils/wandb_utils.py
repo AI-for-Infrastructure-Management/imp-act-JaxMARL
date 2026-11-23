@@ -6,7 +6,14 @@ import yaml
 from pathlib import Path
 import re
 
-api = wandb.Api()
+from functools import cache
+
+
+@cache
+def get_api() -> wandb.Api:
+    """The W&B API, created on first use so that evaluating local runs needs no W&B login."""
+    return wandb.Api()
+
 
 # Define the keys to download from the run history.
 # If the history contains any of these keys, the data will be downloaded.
@@ -38,7 +45,7 @@ def download_run(run: wandb.apis.public.Run | str) -> dict:
               history, config, summary, and URL.
     """
     if isinstance(run, str):
-        run = api.run(run)
+        run = get_api().run(run)
 
     match_keys = [k for k in run.history().keys() if k in HISTORY_KEYS_TO_DOWNLOAD]
 
@@ -92,7 +99,7 @@ def download_sweep(sweep_id: str, path: str) -> dict:
     Returns:
         dict: A high-level summary of the sweep, including ID, name, runs, and URL.
     """
-    sweep = api.sweep(sweep_id)
+    sweep = get_api().sweep(sweep_id)
     print(f'Downloading data for sweep {sweep.name}')
 
     sweep_path = Path.joinpath(Path(path), sweep.name)
@@ -141,7 +148,7 @@ def download_project(entity: str, project: str, path: str) -> None:
         project: The W&B project name.
         path: Directory path where the project data will be stored.
     """
-    project_object = api.project(entity=entity, name=project)
+    project_object = get_api().project(entity=entity, name=project)
     print(f'Downloading data for project {project_object.name}')
     project_path = Path.joinpath(Path(path), project_object.name)
     project_path.mkdir(parents=True, exist_ok=True)
