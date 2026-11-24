@@ -18,6 +18,18 @@ The dependencies are pinned to the versions used for the final runs of the paper
 
 **Option A: uv (recommended)**
 
+<details>
+<summary>Installing uv</summary>
+
+If uv is not installed, the easiest ways to install it are listed below, and further options are given in the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/),
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh  # macOS and Linux
+brew install uv                                  # macOS with Homebrew
+pip install uv                                   # any system with Python and pip
+```
+On Windows, uv can be installed in PowerShell with `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`.
+</details>
+
 After [installing uv](https://docs.astral.sh/uv/getting-started/installation/), create the virtual environment `.venv` in the repository root and install the dependencies of the CPU version,
 ```bash
 uv sync --all-extras
