@@ -1,7 +1,0 @@
-name: impact-jaxmarl-env
-channels:
-  - conda-forge
-dependencies:
-  - poetry=1.7.1
-  - python=3.10
-  - lockfile=0.12.2

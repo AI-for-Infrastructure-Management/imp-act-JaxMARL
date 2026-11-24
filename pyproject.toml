@@ -67,3 +67,28 @@ dev = [
 [project.urls]
 "Homepage" = "https://github.com/FLAIROx/JaxMARL"
 "Bug Tracker" = "https://github.com/FLAIROx/JaxMARL/issues"
+
+# uv project settings (uv sync). pip ignores these sections and installs from requirements/ instead.
+[dependency-groups]
+# IMP-act (the submodule in ./imp-act) and the packages of imp-act/requirements/requirements.txt
+imp-act = [
+  "imp-act",
+  "gymnasium",
+  "networkx",
+  "tabulate",
+  "pre-commit",
+]
+# CUDA build of JAX for the GPU version (Linux only)
+cuda = [
+  "jax[cuda12]==0.4.30 ; sys_platform == 'linux'",
+]
+
+[tool.uv]
+default-groups = ["imp-act"]
+environments = [
+  "python_version == '3.10' and sys_platform == 'linux'",
+  "python_version == '3.10' and sys_platform == 'darwin'",
+]
+
+[tool.uv.sources]
+imp-act = { path = "imp-act", editable = true }

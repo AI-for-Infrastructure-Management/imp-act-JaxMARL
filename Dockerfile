@@ -25,28 +25,12 @@ RUN git clone https://github.com/AI-for-Infrastructure-Management/imp-act-JaxMAR
     cd imp-act && \
     git checkout main
 
-# Create venv and install Python 3.10 with uv
-# venv is needed to avoid conflicts with system cuda/python packages
+# Create the venv .venv with Python 3.10 and install the pinned dependencies of the GPU version
+# (uv.lock, versions of the final runs); the venv is needed to avoid conflicts with system cuda/python packages
 WORKDIR /workspace/imp-act-JaxMARL
-RUN uv python install 3.10 && uv venv --python 3.10 .venv
+RUN uv sync --frozen --no-cache --all-extras --group cuda
 # make sure Python in this venv is used by default
 ENV PATH="/workspace/imp-act-JaxMARL/.venv/bin:$PATH"
-
-# Install Python Packages
-
-# 1. Modify Jax dependency for CUDA 
-RUN sed -i 's/jax==\(.*\)/jax[cuda12]==\1/' /workspace/imp-act-JaxMARL/pyproject.toml
-
-# 2. Install JaxMARL
-RUN cd /workspace/imp-act-JaxMARL && \
-    uv pip install --no-cache-dir -e ".[algs]"
-# Undo the Jax dependency modification
-RUN sed -i 's/jax\[cuda12\]==\(.*\)/jax==\1/' /workspace/imp-act-JaxMARL/pyproject.toml
-
-# 3. Install imp-act
-RUN cd /workspace/imp-act-JaxMARL/imp-act && \
-    uv pip install -r requirements/requirements.txt && \
-    uv pip install -e .
 
 # Clean up
 RUN rm -rf \

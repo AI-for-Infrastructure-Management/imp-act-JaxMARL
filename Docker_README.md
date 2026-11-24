@@ -19,8 +19,9 @@ docker buildx build \
   --load .
 ```
 
-Once the image is built, you can run it, and activate the conda 
-environment inside the container, and navigate to the project directory.
+Once the image is built, it can be run, and the project directory is
+`/workspace/imp-act-JaxMARL`. The virtual environment `.venv` in this directory,
+with the pinned dependencies of `uv.lock` (GPU version), is activated by default.
 ```bash 
-conda activate impact-jaxmarl-env && cd /workspace/imp-act-JaxMARL
+cd /workspace/imp-act-JaxMARL
 ```
