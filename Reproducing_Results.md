@@ -38,7 +38,7 @@ python experiments/vdn_rnn_road_env.py --config-path config/final_runs --config-
     ENV_KWARGS.map_name=Cologne-v1-unconstrained SEED=200
 ```
 
-Each run trains for 50M environment steps, saves a checkpoint after every 1% of the training updates, and logs to Weights & Biases (W&B). To train without W&B, add `WANDB_MODE=disabled`. VDN<sub>BA</sub> is not trained separately, since it evaluates the VDN checkpoints with budget-aware action selection (see [Evaluation](#evaluation)).
+Each run trains for 50M environment steps, saves a checkpoint after every 1% of the training updates, evaluates it on 10,000 episodes (see [All checkpoints of a training run](#all-checkpoints-of-a-training-run)), and logs to Weights & Biases (W&B). To train without W&B, add `WANDB_MODE=disabled`. VDN<sub>BA</sub> is not trained separately, since it evaluates the VDN checkpoints with budget-aware action selection (see [Evaluation](#evaluation)).
 
 ## Hyperparameter tuning
 
@@ -87,14 +87,22 @@ The script prints the mean return over `TEST_NUM_ENVS` episodes and saves it to 
 
 ## All checkpoints of a training run
 
-To evaluate every checkpoint of your own training runs, as we did to obtain `results.csv`, we provide `evaluation/evaluate_runs.py` together with one evaluation config per map and algorithm in `evaluation/config/final_run_evaluations/`:
+Every checkpoint of a final run is evaluated during training. The final-run configs evaluate the policy after every 1% of the training updates (`TEST_INTERVAL: 0.01`), at the same updates at which the checkpoints are saved, on 10,000 episodes (`TEST_NUM_ENVS: 10_000`). With `STORE_EVAL_RETURNS: True`, the return of every evaluation episode is stored in `checkpoints/{SEED_KEY}/eval_returns_{STEP}.csv` of the run folder. The mean return of every checkpoint and its 95% bootstrap confidence interval are then computed from these returns with
 
 ```bash
-python evaluation/evaluate_runs.py --config-path config/final_run_evaluations/{ENV} --config-name {ALG} \
+python evaluation/compute_eval_statistics.py {EVALUATION_PATH} -o {OUTPUT_PATH} --workers {WORKERS}
+```
+
+which finds all training runs below `{EVALUATION_PATH}` and writes one row per checkpoint and evaluation to `{OUTPUT_PATH}/inference_results.csv`. This step re-runs no inference, only needs numpy, scipy and pyyaml, and runs on the CPU. `results.csv` was obtained in this way for all algorithms except VDN<sub>BA</sub>.
+
+Since VDN<sub>BA</sub> is not trained, its returns are produced after training by evaluating the VDN checkpoints with budget-aware action selection,
+
+```bash
+python evaluation/generate_eval_returns.py --config-path config/final_run_evaluations/{ENV} --config-name vdn_ba_rnn \
     EVALUATION_PATH={EVALUATION_PATH}
 ```
 
-where `{ENV}` is one of `toy_example_v2`, `cologne_v1` and `cologne_bonn_dusseldorf_v1`, `{ALG}` is one of `vdn_rnn`, `vdn_ba_rnn`, `qmix_rnn`, `pqn_rnn`, `mappo_rnn` and `ippo_rnn`, and `{EVALUATION_PATH}` is the folder with the training runs. By default, all 10,000 evaluation episodes run in parallel, and lowering `TEST_NUM_ENVS` reduces the GPU memory usage.
+where `{ENV}` is one of `toy_example_v2`, `cologne_v1` and `cologne_bonn_dusseldorf_v1`, and `{EVALUATION_PATH}` is the folder with the VDN training runs. The returns are written to `eval_returns/vdn_ba_rnn/` in each run folder, next to the returns stored during training, and the statistics of all returns below `{EVALUATION_PATH}` are computed when the script finishes. Runs trained without `STORE_EVAL_RETURNS` are evaluated in the same way with `--config-name {ALG}`, where `{ALG}` is one of `vdn_rnn`, `qmix_rnn`, `pqn_rnn`, `mappo_rnn` and `ippo_rnn`. By default, all 10,000 evaluation episodes run in parallel (5,000 on `CologneBonnDusseldorf-v1`), and lowering `TEST_NUM_ENVS` reduces the GPU memory usage. Both steps and their options are described in [`evaluation/README.md`](evaluation/README.md).
 
 # Heuristics
 
