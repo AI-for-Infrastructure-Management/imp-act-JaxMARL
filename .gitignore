@@ -10,6 +10,7 @@ __pycache__/
 docker/*
 *.pickle
 results/
+!/results/
 tmp/
 *-checkpoint.py
 wandb/
@@ -18,15 +19,13 @@ models/
 *.csv*
 !results.ipynb
 !Figure_8.ipynb
-!evaluation/hyperparameter_tuning_analysis.ipynb
+!results/nb_hyperparameter_tuning.ipynb
+!results/nb_rollout_data.ipynb
 evaluation/data
 
-slurm_scripts/*
-# Keep the hyperparameter-tuning workflow scripts in version control
-# (see hyperparameter_tuning.md).
-!slurm_scripts/launch_hypers_sweep.sh
-!slurm_scripts/sample_random_search.py
-!slurm_scripts/wand_sync_hypers_sweep.sh
+# Cluster-specific tuning workflow, kept locally
+slurm_scripts/
+hyperparameter_tuning.md
 *.out
 .venv/
 .venv

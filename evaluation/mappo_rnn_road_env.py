@@ -386,7 +386,7 @@ def evaluate_checkpoint(config_eval):
 
 
 @hydra.main(
-    version_base=None, config_path="./config", config_name="eval_mappo_rnn_road_env"
+    version_base=None, config_path="./config", config_name="eval_single_checkpoint"
 )
 def main(config):
     config = OmegaConf.to_container(config)

@@ -1,0 +1,10 @@
+EVALUATION_PATH: "data/models/ToyExample-v2"
+TEST_NUM_ENVS : 10000
+TEST_NUM_EPISODES: 10000
+VMAPPED_SEED : 0
+EVAL_SEED : 0
+BASE_PATH : Null
+
+hydra:
+  run:
+    dir: outputs/evaluation/${now:%Y-%m-%d_%H-%M-%S.%f}  # Directory to save evaluation logs

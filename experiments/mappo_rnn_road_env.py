@@ -1061,7 +1061,7 @@ def tune(default_config):
     wandb.agent(sweep_id, wrapped_make_train, count=50)
 
 
-@hydra.main(version_base=None, config_path="config", config_name="mappo_rnn_road_env")
+@hydra.main(version_base=None, config_path="./config/final_runs", config_name="mappo_rnn_road_env")
 def main(config):
 
     config = OmegaConf.to_container(config)

@@ -1,0 +1,22 @@
+EVALUATION_PATH: Null       # defaults to <BASE_PATH>/outputs, where hydra writes runs
+TEST_NUM_ENVS : 10000
+TEST_NUM_EPISODES: 10000
+VMAPPED_SEED : 0
+EVAL_SEED : 0
+BASE_PATH : Null
+
+EVAL_VDN_BA: False          # evaluate a vdn_rnn policy with budget-aware action selection
+
+# Raw returns are written to <run>/eval_returns/<algorithm>/seed<EVAL_SEED>/. A
+# directory that already holds a full set is skipped; FORCE re-evaluates it anyway.
+FORCE: False
+
+# Statistics are computed by compute_eval_statistics.py, which is run over
+# EVALUATION_PATH once the returns exist. Set false for cluster array tasks and run
+# one table pass over the whole tree afterwards, instead of one per task.
+WRITE_RESULTS_TABLE: True
+RESULTS_PATH: Null          # defaults to compute_eval_statistics.py's own default
+
+hydra:
+  run:
+    dir: outputs/evaluation/${now:%Y-%m-%d_%H-%M-%S.%f}  # Directory to save evaluation logs

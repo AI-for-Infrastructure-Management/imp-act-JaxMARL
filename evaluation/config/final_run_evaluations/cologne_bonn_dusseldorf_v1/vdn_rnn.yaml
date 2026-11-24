@@ -3,12 +3,7 @@ TEST_NUM_ENVS : 5000
 TEST_NUM_EPISODES: 10000
 VMAPPED_SEED : 0
 EVAL_SEED : 0
-REWARD_SCALE : 1e6
 BASE_PATH : Null
-TOP_K_CHECKPOINTS : Null
-
-RUN_DATA_PATH: "data/wandb_run_data/"
-
 
 hydra:
   run:
